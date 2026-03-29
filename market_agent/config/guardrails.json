@@ -1,0 +1,46 @@
+{
+    "stop_loss_multiplier": {
+        "min": 1.0,
+        "max": 5.0,
+        "description": "Prevents excessively tight (losses) or wide (drawdown) stops."
+    },
+    "take_profit_rr": {
+        "min": 1.0,
+        "max": 10.0,
+        "description": "Ensures reward is at least equal to risk."
+    },
+    "rsi_period": {
+        "min": 2,
+        "max": 50,
+        "description": "Standard oscillator bounds."
+    },
+    "macd_fast": {
+        "min": 3,
+        "max": 50
+    },
+    "macd_slow": {
+        "min": 10,
+        "max": 100
+    },
+    "macd_signal": {
+        "min": 2,
+        "max": 30
+    },
+    "risk_management": {
+        "max_daily_loss_pct": 3.0,
+        "consecutive_loss_limit": 3,
+        "cooldown_minutes": 30,
+        "max_concurrent_signals": 5,
+        "min_regime_accuracy": 30.0,
+        "description": "Seeds that self-tune. max_daily_loss widens if breaker fires too often, tightens if accuracy drops with no breaker."
+    },
+    "whitelisted_domains": [
+        "ssrn.com",
+        "arxiv.org",
+        "investopedia.com",
+        "cfr.org",
+        "federalreserve.gov",
+        "nseindia.com",
+        "bseindia.com"
+    ]
+}

@@ -24,9 +24,7 @@ HOW TO RUN LOCALLY:
   python causal_paper_scout.py
 
 HOW TO DEPLOY ON RENDER:
-  Deployed as a FREE Web Service via render.yaml.
-  A health server runs on PORT (set by Render) so UptimeRobot can
-  ping /health every 5 min to prevent the free tier from spinning down.
+  Deployed as a Background Worker via render.yaml.
   Set DATABASE_URL in Render Environment tab.
 """
 
@@ -42,6 +40,7 @@ from typing import Dict, List, Optional
 
 import structlog
 import pandas as pd
+import requests
 import yfinance as yf
 
 # Load .env file when running locally (no-op if dotenv not installed)
@@ -180,29 +179,300 @@ def _is_market_open(symbol: str) -> bool:
 
 
 # ═══════════════════════════════════════════════════════════
-# DATA FETCHING — yfinance with in-cycle caching
+# DATA FETCHING — 2-tier waterfall, tested locally before deploy
+#
+# DATA WATERFALL (proven by local testing):
+#
+#   .NS Indian stocks (ADANIENT, ADANIPORTS, LT):
+#     Tier 1 -- Breeze (ICICI Direct API) -- real exchange data, no blocks
+#     Tier 2 -- ScraperAPI -- direct Yahoo v8 via requests proxy
+#     Tier 3 -- plain yfinance -- local only, blocked on Render cloud IPs
+#
+#   US/FX/Commodities (AAPL, AMD, NVDA etc, GBPJPY, GC=F):
+#     Tier 1 -- ScraperAPI -- direct Yahoo v8 via requests proxy (PROVEN)
+#     Tier 2 -- plain yfinance -- fallback, works locally
+#
+#   REMOVED -- Finnhub: 403 on free tier, OHLCV requires paid plan
+#   REMOVED -- yfinance+session: triggers cookie bug #2470
 # ═══════════════════════════════════════════════════════════
 
 _cache: Dict[str, Dict] = {}
 _CACHE_TTL_MINUTES = 50   # re-use fetched data within same 55-min cycle
 
+# ── ScraperAPI quota guard ────────────────────────────────────────────────────
+_SCRAPER_DAILY_LIMIT = int(os.getenv("SCRAPER_DAILY_LIMIT", "900"))
+_scraper_calls_today = 0
+_scraper_reset_date  = datetime.now(timezone.utc).date()
+
+
+def _scraper_quota_ok() -> bool:
+    """Returns True if ScraperAPI daily quota not yet exhausted. Resets at UTC midnight."""
+    global _scraper_calls_today, _scraper_reset_date
+    today = datetime.now(timezone.utc).date()
+    if today != _scraper_reset_date:
+        _scraper_calls_today = 0
+        _scraper_reset_date  = today
+        logger.info("scraper_quota_reset", new_date=str(today))
+    return _scraper_calls_today < _SCRAPER_DAILY_LIMIT
+
+
+def _fetch_scraperapi(symbol: str, interval: str, period: str) -> Optional[pd.DataFrame]:
+    """
+    TIER 1 -- Yahoo Finance v8 API via requests + ScraperAPI proxy.
+
+    WHY direct requests instead of yfinance:
+      - yfinance curl_cffi ignores HTTP_PROXY/HTTPS_PROXY env vars
+      - Any custom session passed to yfinance triggers cookie bug #2470:
+        'str object has no attribute name'
+      - Direct requests call PROVEN working locally:
+        Status 200, 32 bars via ScraperAPI (see test_scraper_debug.py)
+
+    Quota guard: falls to Tier 2 when daily limit hit.
+    Requires: SCRAPER_API_KEY env var.
+    """
+    global _scraper_calls_today
+
+    api_key = os.getenv("SCRAPER_API_KEY", "")
+    if not api_key:
+        return None
+
+    if not _scraper_quota_ok():
+        logger.warning("scraper_daily_limit_hit",
+                       limit=_SCRAPER_DAILY_LIMIT, used=_scraper_calls_today)
+        return None
+
+    _PERIOD_TO_RANGE = {
+        "5d": "5d", "7d": "7d", "30d": "1mo", "60d": "3mo",
+        "90d": "3mo", "1mo": "1mo", "3mo": "3mo", "6mo": "6mo",
+    }
+    yf_range  = _PERIOD_TO_RANGE.get(period, period)
+    proxy_url = f"http://scraperapi:{api_key}@proxy-server.scraperapi.com:8001"
+    url       = f"https://query2.finance.yahoo.com/v8/finance/chart/{symbol}"
+
+    try:
+        resp = requests.get(
+            url,
+            params={"interval": interval, "range": yf_range},
+            proxies={"http": proxy_url, "https": proxy_url},
+            headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                                   "AppleWebKit/537.36 (KHTML, like Gecko) "
+                                   "Chrome/122.0.0.0 Safari/537.36"},
+            verify=False,
+            timeout=20,
+        )
+
+        if resp.status_code != 200:
+            logger.debug("scraper_yahoo_http_error",
+                         symbol=symbol, status=resp.status_code)
+            return None
+
+        data   = resp.json()
+        result = data.get("chart", {}).get("result")
+        if not result:
+            logger.debug("scraper_yahoo_no_result", symbol=symbol)
+            return None
+
+        result     = result[0]
+        timestamps = result.get("timestamp", [])
+        ohlcv      = result.get("indicators", {}).get("quote", [{}])[0]
+
+        if not timestamps or not ohlcv.get("close"):
+            return None
+
+        df = pd.DataFrame({
+            "Open":   ohlcv.get("open",   [None] * len(timestamps)),
+            "High":   ohlcv.get("high",   [None] * len(timestamps)),
+            "Low":    ohlcv.get("low",    [None] * len(timestamps)),
+            "Close":  ohlcv.get("close",  [None] * len(timestamps)),
+            "Volume": ohlcv.get("volume", [0]    * len(timestamps)),
+        }, index=pd.to_datetime(timestamps, unit="s"))
+
+        df.dropna(inplace=True)
+
+        if len(df) < 30:
+            logger.debug("scraper_too_few_bars", symbol=symbol, bars=len(df))
+            return None
+
+        _scraper_calls_today += 1
+        logger.debug("scraper_ok", symbol=symbol, bars=len(df),
+                     calls_today=_scraper_calls_today)
+        return df
+
+    except Exception as e:
+        logger.debug("scraper_failed", symbol=symbol, error=str(e)[:120])
+        return None
+
+
+
+def _fetch_breeze(symbol: str, interval: str, period: str) -> Optional[pd.DataFrame]:
+    """
+    Breeze (ICICI Direct) -- used ONLY for Indian NSE stocks (.NS).
+
+    WHY Breeze for Indian stocks:
+      Breeze connects directly to NSE exchange feed -- no IP blocking,
+      no rate limits for our usage, real OHLCV data.
+      ScraperAPI/yfinance both struggle with .NS on cloud IPs.
+
+    Interval mapping:
+      yfinance "1h"  -> Breeze "1hour"
+      yfinance "4h"  -> Breeze "1hour" (resampled to 4h after fetch)
+      yfinance "1d"  -> Breeze "1day"
+
+    Period -> days mapping:
+      "30d" -> 30 days back, "60d" -> 60, "90d" -> 90, "5d" -> 5
+
+    Requires: BREEZE_API_KEY, BREEZE_SECRET, BREEZE_SESSION_TOKEN env vars.
+    Token expires daily -- must be refreshed manually in Render dashboard.
+    """
+    # Only for Indian stocks
+    if ".NS" not in symbol and ".BO" not in symbol:
+        return None
+
+    api_key   = os.getenv("BREEZE_API_KEY", "")
+    secret    = os.getenv("BREEZE_SECRET", "")
+    token     = os.getenv("BREEZE_SESSION_TOKEN", "")
+
+    if not api_key or not secret or not token:
+        logger.debug("breeze_keys_missing", symbol=symbol)
+        return None
+
+    try:
+        from breeze_connect import BreezeConnect
+
+        breeze = BreezeConnect(api_key=api_key)
+        breeze.generate_session(api_secret=secret, session_token=token)
+
+        # Breeze uses its own internal isec_stock_code, NOT the NSE ticker.
+        # Confirmed via breeze.get_names() -- do NOT change these mappings.
+        # exchange_stock_code (NSE) -> isec_stock_code (Breeze internal)
+        _BREEZE_CODE_MAP = {
+            "ADANIENT":  "ADAENT",
+            "ADANIPORTS": "ADAPOR",
+            "LT":        "LARTOU",
+        }
+        exchange    = "NSE" if ".NS" in symbol else "BSE"
+        nse_ticker  = symbol.replace(".NS", "").replace(".BO", "")
+        bare_symbol = _BREEZE_CODE_MAP.get(nse_ticker, nse_ticker)
+
+        if bare_symbol == nse_ticker and nse_ticker not in _BREEZE_CODE_MAP:
+            logger.warning("breeze_unmapped_symbol", symbol=symbol,
+                           msg="Add isec_stock_code to _BREEZE_CODE_MAP via get_names()")
+
+        # Interval mapping
+        # Valid Breeze intervals: '1second','1minute','5minute','30minute','1day'
+        # '1hour' is NOT valid. Use '30minute' and resample to 1h/4h after fetch.
+        _INTERVAL_MAP = {"1h": "30minute", "4h": "30minute", "1d": "1day"}
+        breeze_interval = _INTERVAL_MAP.get(interval, "30minute")
+
+        # Period -> days
+        _PERIOD_DAYS = {
+            "5d": 5, "7d": 7, "30d": 30, "60d": 60,
+            "90d": 90, "1mo": 30, "3mo": 90, "6mo": 180,
+        }
+        days = _PERIOD_DAYS.get(period, 30)
+
+        from_dt = (datetime.now() - timedelta(days=days)).strftime("%Y-%m-%dT00:00:00.000Z")
+        to_dt   = datetime.now().strftime("%Y-%m-%dT23:59:59.000Z")
+
+        resp = breeze.get_historical_data_v2(
+            interval=breeze_interval,
+            from_date=from_dt,
+            to_date=to_dt,
+            stock_code=bare_symbol,
+            exchange_code=exchange,
+            product_type="Cash",
+        )
+
+        if not resp or resp.get("Status") != 200:
+            err = resp.get("Error", "unknown") if resp else "no response"
+            # Check if token is stale -- most common failure
+            if "session" in str(err).lower() or "token" in str(err).lower() or "auth" in str(err).lower():
+                logger.warning("breeze_token_expired",
+                               symbol=symbol,
+                               msg="Refresh BREEZE_SESSION_TOKEN in Render dashboard")
+            else:
+                logger.debug("breeze_api_error", symbol=symbol, error=str(err)[:80])
+            return None
+
+        rows = resp.get("Success", [])
+        if not rows:
+            logger.debug("breeze_no_rows", symbol=symbol)
+            return None
+
+        df = pd.DataFrame(rows)
+
+        # Breeze column names vary -- normalize
+        # Confirmed column names from live Breeze response (test_breeze_cols.py):
+        # ['close', 'datetime', 'exchange_code', 'high', 'low', 'open', 'stock_code', 'volume']
+        df.index = pd.to_datetime(df["datetime"])
+        df = df[["open", "high", "low", "close", "volume"]].copy()
+        df.columns = ["Open", "High", "Low", "Close", "Volume"]
+        df = df.apply(pd.to_numeric, errors="coerce")
+        df.dropna(inplace=True)
+        df.sort_index(inplace=True)
+
+        # Breeze returns 30min bars -- resample to target interval
+        # For 1h: aggregate pairs of 30min bars
+        # For 4h: aggregate 8x 30min bars
+        # For 1d: already daily, no resample needed
+        if interval in ("1h", "4h"):
+            resample_rule = "1h" if interval == "1h" else "4h"
+            df = df.resample(resample_rule).agg({
+                "Open": "first", "High": "max",
+                "Low": "min",   "Close": "last", "Volume": "sum",
+            }).dropna()
+
+        if len(df) < 10:
+            logger.debug("breeze_too_few_bars", symbol=symbol, bars=len(df))
+            return None
+
+        logger.debug("breeze_ok", symbol=symbol, bars=len(df),
+                     interval=interval, exchange=exchange)
+        return df
+
+    except ImportError:
+        logger.warning("breeze_not_installed",
+                       msg="Add breeze-connect to requirements_scout.txt")
+        return None
+    except Exception as e:
+        err_str = str(e)
+        if "session" in err_str.lower() or "token" in err_str.lower():
+            logger.warning("breeze_token_expired",
+                           symbol=symbol,
+                           msg="Refresh BREEZE_SESSION_TOKEN in Render dashboard")
+        else:
+            logger.debug("breeze_failed", symbol=symbol, error=err_str[:120])
+        return None
+
+
+def _fetch_yfinance_plain(symbol: str, interval: str, period: str) -> Optional[pd.DataFrame]:
+    """
+    TIER 2 — Plain yfinance, no proxy, no session override.
+
+    Works locally. May be blocked by Yahoo on Render cloud IPs.
+    If blocked, symbol is skipped this cycle — not fatal.
+    """
+    try:
+        df = yf.Ticker(symbol).history(period=period, interval=interval)
+        if df is None or df.empty:
+            return None
+        if df.index.tz is not None:
+            df.index = df.index.tz_localize(None)
+        df = df[["Open", "High", "Low", "Close", "Volume"]].copy()
+        df.dropna(inplace=True)
+        return df if len(df) >= 30 else None
+    except Exception as e:
+        logger.debug("yf_plain_failed", symbol=symbol, error=str(e)[:80])
+        return None
+
 
 def _fetch_ohlcv(symbol: str, interval: str, period: str) -> Optional[pd.DataFrame]:
     """
-    Fetch OHLCV bars from yfinance with a 50-minute in-process cache.
+    2-TIER DATA WATERFALL — tries each source in order, returns first success.
+    All tiers share the 50-minute cache — whichever wins is reused next cycle.
 
-    WHY YFINANCE ONLY (not Breeze/AngelOne for paper trading):
-      - Paper trade entry/exit uses bar CLOSE — 15-min delay on yfinance
-        is irrelevant for 1h/4h bars where indicator math is what matters.
-      - All 13 confirmed symbols are covered by yfinance:
-          NSE (.NS)  : Yahoo uses NSE feed, ~15-min delay
-          US equities: ~15-min delay on free tier
-          FX (=X)    : real-time from Yahoo
-          GC=F       : real-time futures from Yahoo
-      - No API key. No session token. No rate limits at 55-min intervals.
-
-    For live trading (not paper), we would switch to Breeze for .NS and
-    direct exchange feeds for US — but that is a future concern.
+    TIER 1 — ScraperAPI + curl_cffi  (requires SCRAPER_API_KEY)
+    TIER 2 — plain yfinance           (always attempted, free)
     """
     cache_key = f"{symbol}_{interval}"
     hit = _cache.get(cache_key)
@@ -211,45 +481,83 @@ def _fetch_ohlcv(symbol: str, interval: str, period: str) -> Optional[pd.DataFra
         if age_min < _CACHE_TTL_MINUTES:
             return hit["df"]
 
-    try:
-        df = yf.Ticker(symbol).history(period=period, interval=interval)
-
-        if df is None or df.empty:
-            logger.warning("yf_data_empty", symbol=symbol, interval=interval)
-            return None
-
-        # Drop timezone info — brain code expects tz-naive DatetimeIndex
-        if df.index.tz is not None:
-            df.index = df.index.tz_localize(None)
-
-        df = df[["Open", "High", "Low", "Close", "Volume"]].copy()
-        df.dropna(inplace=True)
-
-        if len(df) < 30:
-            logger.warning("yf_data_insufficient", symbol=symbol, rows=len(df))
-            return None
-
+    def _cache_and_return(df, tier):
+        logger.debug("data_fetch_ok", symbol=symbol, tier=tier, bars=len(df))
         _cache[cache_key] = {"df": df, "fetched_at": datetime.now()}
         return df
 
-    except Exception as e:
-        logger.error("yf_fetch_failed", symbol=symbol, error=str(e)[:120])
-        return None
+    is_indian = ".NS" in symbol or ".BO" in symbol
+
+    if is_indian:
+        # Indian stocks: Breeze first (real exchange data), then fallbacks
+        df = _fetch_breeze(symbol, interval, period)
+        if df is not None:
+            return _cache_and_return(df, "T1-Breeze")
+
+        df = _fetch_scraperapi(symbol, interval, period)
+        if df is not None:
+            return _cache_and_return(df, "T2-ScraperAPI")
+
+        df = _fetch_yfinance_plain(symbol, interval, period)
+        if df is not None:
+            return _cache_and_return(df, "T3-yf-plain")
+
+    else:
+        # US / FX / Commodities: ScraperAPI first, plain yfinance fallback
+        df = _fetch_scraperapi(symbol, interval, period)
+        if df is not None:
+            return _cache_and_return(df, "T1-ScraperAPI")
+
+        df = _fetch_yfinance_plain(symbol, interval, period)
+        if df is not None:
+            return _cache_and_return(df, "T2-yf-plain")
+
+    logger.warning("data_all_tiers_failed", symbol=symbol, interval=interval)
+    return None
 
 
 def _get_current_price(symbol: str, fallback_df: pd.DataFrame) -> float:
     """
-    Attempt near-real-time price via yfinance fast_info.
-    Falls back to the last bar's Close if fast_info is unavailable.
-    fast_info does not require an API key and is near-real-time.
+    Get current price.
+    1. ScraperAPI -- Yahoo quote endpoint via requests (direct, no yfinance)
+    2. plain yfinance fast_info
+    3. last bar Close from OHLCV already fetched (always available)
     """
+    # -- Tier 1: ScraperAPI direct Yahoo quote via requests ---
+    api_key = os.getenv("SCRAPER_API_KEY", "")
+    if api_key and _scraper_quota_ok():
+        proxy_url = f"http://scraperapi:{api_key}@proxy-server.scraperapi.com:8001"
+        try:
+            resp = requests.get(
+                f"https://query2.finance.yahoo.com/v8/finance/chart/{symbol}",
+                params={"interval": "1m", "range": "1d"},
+                proxies={"http": proxy_url, "https": proxy_url},
+                headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                                       "AppleWebKit/537.36"},
+                verify=False,
+                timeout=10,
+            )
+            if resp.status_code == 200:
+                result = resp.json().get("chart", {}).get("result", [{}])[0]
+                meta   = result.get("meta", {})
+                price  = meta.get("regularMarketPrice") or meta.get("previousClose")
+                if price and float(price) > 0:
+                    return float(price)
+        except Exception:
+            pass
+
+    # -- Tier 2: plain yfinance fast_info ---
     try:
         price = yf.Ticker(symbol).fast_info.last_price
         if price and float(price) > 0:
             return float(price)
     except Exception:
         pass
+
+    # -- Tier 3: last bar Close (always available) ---
     return float(fallback_df["Close"].iloc[-1])
+
+
 
 
 # ═══════════════════════════════════════════════════════════
@@ -506,28 +814,25 @@ def _run_scan_cycle(config: Dict, storage, tracker: SessionTracker,
 
 
 # ═══════════════════════════════════════════════════════════
-# MAIN LOOP
-# ═══════════════════════════════════════════════════════════
-
-# ═══════════════════════════════════════════════════════════
 # HEALTH SERVER — keeps Render Free Web Service alive
 #
 # Render free Web Services spin down after 15 min of inactivity.
-# This tiny HTTP server answers GET / and GET /health so that
-# UptimeRobot can ping it every 5 minutes and prevent spin-down.
+# This tiny HTTP server answers GET /health so UptimeRobot can
+# ping every 5 minutes and prevent spin-down.
 #
-# Uses Python's built-in http.server — ZERO new dependencies.
-# Runs in a daemon thread so it never blocks the scanning loop.
+# CRITICAL: Must bind to PORT before Render's 60-second deadline
+# or Render marks the deploy as failed. We start this FIRST,
+# before any DB connection or brain loading.
 #
-# Port: read from PORT env var (Render sets this automatically).
-#       Falls back to 8080 for local testing.
+# Uses Python built-in http.server — ZERO new dependencies.
+# Runs in a daemon thread so it never blocks the scan loop.
 # ═══════════════════════════════════════════════════════════
 
 def _start_health_server():
     """
     Start a minimal HTTP health server in a background daemon thread.
-    Responds 200 OK to any GET request with a plain-text status line.
-    Called once at startup — before the main scanning loop begins.
+    Responds 200 OK to any GET request.
+    Called as the very first thing in start_scout() — before DB, before brain.
     """
     from http.server import BaseHTTPRequestHandler, HTTPServer
 
@@ -541,7 +846,7 @@ def _start_health_server():
             self.wfile.write(body)
 
         def log_message(self, fmt, *args):
-            pass   # silence per-request access logs — keep Render logs clean
+            pass  # silence per-request access logs
 
     port = int(os.getenv("PORT", "8080"))
     server = HTTPServer(("0.0.0.0", port), _HealthHandler)
@@ -550,15 +855,17 @@ def _start_health_server():
     print(f"  ✅ Health server running on port {port}  (UptimeRobot target: /health)")
 
 
+# ═══════════════════════════════════════════════════════════
+# MAIN LOOP
+# ═══════════════════════════════════════════════════════════
+
 def start_scout(brain_key: str = ACTIVE_BRAIN_KEY,
                 interval_minutes: int = INTERVAL_MINUTES):
     """
     Main entry point. Runs forever until stopped.
-    Render Background Worker keeps this running 24/7 without spinning down.
+    Deployed as a FREE Web Service on Render. Health server binds the port
+    immediately so Render does not kill the process during startup.
     """
-    # ── Start health server (keeps Render free tier alive) ───────
-    _start_health_server()
-
     # ── Validate brain key ────────────────────────────────────────
     config = PAPER_TRADE_CONFIGS.get(brain_key)
     if not config:
@@ -659,4 +966,9 @@ def start_scout(brain_key: str = ACTIVE_BRAIN_KEY,
 
 
 if __name__ == "__main__":
+    # ── Bind port IMMEDIATELY — before any imports, DB connections, or brain loading
+    # Render kills the process if no port is bound within 60 seconds of startup.
+    # Starting the health server here (module level) guarantees the port is bound
+    # even if start_scout() later crashes on a DB or import error.
+    _start_health_server()
     start_scout()

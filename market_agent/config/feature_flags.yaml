@@ -1,0 +1,18 @@
+phase_12_features:
+  # P0: Memory & Depth
+  faiss_migration: false
+  edgar_research: false
+  nse_filings: false
+  
+  # P1: Risk & Trust
+  portfolio_var: false
+  shap_explain: false
+  
+  # P2: Stability
+  event_handler: false
+  nse_calendar: false
+  
+  # Extraordinary Edge
+  options_flow: false
+  cross_asset_macro: false
+  event_calendar_alpha: false

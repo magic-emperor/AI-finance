@@ -1,0 +1,307 @@
+{
+    "ITC.NS": {
+        "HDFCBANK.NS": {
+            "lag": 3,
+            "p_value": 0.0,
+            "strength": 1.0
+        },
+        "LT.NS": {
+            "lag": 1,
+            "p_value": 0.0,
+            "strength": 1.0
+        },
+        "ADANIENT.NS": {
+            "lag": 1,
+            "p_value": 0.0,
+            "strength": 1.0
+        }
+    },
+    "HDFCBANK.NS": {
+        "ADANIENT.NS": {
+            "lag": 5,
+            "p_value": 0.0487,
+            "strength": 0.112
+        },
+        "ADANIPORTS.NS": {
+            "lag": 1,
+            "p_value": 0.0382,
+            "strength": 0.215
+        },
+        "GOOGL": {
+            "lag": 2,
+            "p_value": 0.0273,
+            "strength": 0.18
+        }
+    },
+    "RELIANCE.NS": {
+        "ITC.NS": {
+            "lag": 2,
+            "p_value": 0.0,
+            "strength": 1.0
+        },
+        "HDFCBANK.NS": {
+            "lag": 4,
+            "p_value": 0.0,
+            "strength": 1.0
+        },
+        "TATASTEEL.NS": {
+            "lag": 1,
+            "p_value": 0.0,
+            "strength": 1.0
+        },
+        "LT.NS": {
+            "lag": 2,
+            "p_value": 0.0,
+            "strength": 1.0
+        },
+        "ADANIENT.NS": {
+            "lag": 3,
+            "p_value": 0.0,
+            "strength": 1.0
+        },
+        "ADANIPORTS.NS": {
+            "lag": 3,
+            "p_value": 0.0,
+            "strength": 1.0
+        }
+    },
+    "TATASTEEL.NS": {
+        "HDFCBANK.NS": {
+            "lag": 3,
+            "p_value": 0.0,
+            "strength": 1.0
+        },
+        "RELIANCE.NS": {
+            "lag": 1,
+            "p_value": 0.0149,
+            "strength": 0.297
+        },
+        "LT.NS": {
+            "lag": 1,
+            "p_value": 0.0,
+            "strength": 1.0
+        },
+        "ADANIENT.NS": {
+            "lag": 1,
+            "p_value": 0.0,
+            "strength": 1.0
+        },
+        "AAPL": {
+            "lag": 5,
+            "p_value": 0.0318,
+            "strength": 0.122
+        },
+        "GBPJPY=X": {
+            "lag": 1,
+            "p_value": 0.0464,
+            "strength": 0.198
+        }
+    },
+    "LT.NS": {
+        "HDFCBANK.NS": {
+            "lag": 3,
+            "p_value": 0.0,
+            "strength": 1.0
+        },
+        "RELIANCE.NS": {
+            "lag": 5,
+            "p_value": 0.0001,
+            "strength": 0.274
+        },
+        "TATASTEEL.NS": {
+            "lag": 1,
+            "p_value": 0.0002,
+            "strength": 0.697
+        },
+        "ADANIENT.NS": {
+            "lag": 2,
+            "p_value": 0.0102,
+            "strength": 0.229
+        },
+        "ADANIPORTS.NS": {
+            "lag": 3,
+            "p_value": 0.003,
+            "strength": 0.233
+        }
+    },
+    "ADANIENT.NS": {
+        "HDFCBANK.NS": {
+            "lag": 2,
+            "p_value": 0.0,
+            "strength": 1.0
+        },
+        "TATASTEEL.NS": {
+            "lag": 1,
+            "p_value": 0.035,
+            "strength": 0.223
+        },
+        "LT.NS": {
+            "lag": 5,
+            "p_value": 0.0009,
+            "strength": 0.209
+        },
+        "ADANIPORTS.NS": {
+            "lag": 2,
+            "p_value": 0.0003,
+            "strength": 0.402
+        },
+        "NVDA": {
+            "lag": 2,
+            "p_value": 0.0478,
+            "strength": 0.152
+        }
+    },
+    "ADANIPORTS.NS": {
+        "HDFCBANK.NS": {
+            "lag": 3,
+            "p_value": 0.0,
+            "strength": 1.0
+        },
+        "LT.NS": {
+            "lag": 1,
+            "p_value": 0.0,
+            "strength": 1.0
+        },
+        "ADANIENT.NS": {
+            "lag": 1,
+            "p_value": 0.0,
+            "strength": 1.0
+        },
+        "NVDA": {
+            "lag": 3,
+            "p_value": 0.0038,
+            "strength": 0.224
+        }
+    },
+    "NVDA": {
+        "LT.NS": {
+            "lag": 1,
+            "p_value": 0.0006,
+            "strength": 0.587
+        },
+        "AAPL": {
+            "lag": 1,
+            "p_value": 0.0377,
+            "strength": 0.216
+        },
+        "BTC-USD": {
+            "lag": 2,
+            "p_value": 0.0001,
+            "strength": 0.457
+        }
+    },
+    "GOOGL": {
+        "LT.NS": {
+            "lag": 1,
+            "p_value": 0.0186,
+            "strength": 0.277
+        },
+        "AAPL": {
+            "lag": 1,
+            "p_value": 0.0435,
+            "strength": 0.204
+        },
+        "USDJPY=X": {
+            "lag": 5,
+            "p_value": 0.0366,
+            "strength": 0.119
+        }
+    },
+    "AAPL": {
+        "RELIANCE.NS": {
+            "lag": 3,
+            "p_value": 0.0035,
+            "strength": 0.227
+        }
+    },
+    "AMD": {
+        "LT.NS": {
+            "lag": 1,
+            "p_value": 0.0001,
+            "strength": 0.736
+        },
+        "GC=F": {
+            "lag": 2,
+            "p_value": 0.047,
+            "strength": 0.153
+        }
+    },
+    "BTC-USD": {
+        "GC=F": {
+            "lag": 5,
+            "p_value": 0.0191,
+            "strength": 0.135
+        }
+    },
+    "GBPJPY=X": {
+        "ITC.NS": {
+            "lag": 3,
+            "p_value": 0.0092,
+            "strength": 0.192
+        },
+        "HDFCBANK.NS": {
+            "lag": 2,
+            "p_value": 0.049,
+            "strength": 0.151
+        },
+        "RELIANCE.NS": {
+            "lag": 2,
+            "p_value": 0.0008,
+            "strength": 0.359
+        },
+        "GOOGL": {
+            "lag": 2,
+            "p_value": 0.0271,
+            "strength": 0.181
+        },
+        "USDJPY=X": {
+            "lag": 4,
+            "p_value": 0.0001,
+            "strength": 0.302
+        }
+    },
+    "USDJPY=X": {
+        "NVDA": {
+            "lag": 4,
+            "p_value": 0.0267,
+            "strength": 0.137
+        },
+        "GOOGL": {
+            "lag": 1,
+            "p_value": 0.0259,
+            "strength": 0.248
+        },
+        "AAPL": {
+            "lag": 1,
+            "p_value": 0.0472,
+            "strength": 0.197
+        }
+    },
+    "CL=F": {
+        "ITC.NS": {
+            "lag": 2,
+            "p_value": 0.0442,
+            "strength": 0.156
+        },
+        "LT.NS": {
+            "lag": 1,
+            "p_value": 0.032,
+            "strength": 0.23
+        },
+        "ADANIENT.NS": {
+            "lag": 1,
+            "p_value": 0.0348,
+            "strength": 0.223
+        },
+        "GOOGL": {
+            "lag": 1,
+            "p_value": 0.0015,
+            "strength": 0.505
+        },
+        "GC=F": {
+            "lag": 4,
+            "p_value": 0.0192,
+            "strength": 0.147
+        }
+    }
+}

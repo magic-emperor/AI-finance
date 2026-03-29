@@ -1,7 +1,32 @@
 """
-═══════════════════════════════════════════════════════════════════════
-Brain: Liquidity-Sweep v4 — Institutional Stop-Hunt Reversal Detector
-═══════════════════════════════════════════════════════════════════════
+Brain 7: Liquidity-Sweep — Institutional Stop-Hunt Reversal Detector
+====================================================================
+
+RESEARCH FOUNDATION
+-------------------
+This brain implements a “swing failure / liquidity sweep” pattern:
+price briefly trades through a prior swing level (where stops cluster),
+then *rejects* back through the level, implying a failed breakout and
+potential mean-reverting move.
+
+Evidence caveat (important):
+- We did not find a freely accessible, peer-reviewed study with robust
+  win-rate statistics for *this exact* H1 rule-set across these symbols.
+  Therefore, the only acceptable performance claim for this brain is from
+  our own walk-forward backtests and live/paper outcomes.
+
+Operationally relevant reference:
+- yfinance changed intraday timestamp handling for 1h bars (often UTC),
+  which can break market-hours gating and log interpretation if code assumes
+  exchange-local timestamps. See: https://github.com/ranaroussi/yfinance/issues/2155
+
+WHAT CHANGED FROM v4/v5 (THIS PATCH)
+------------------------------------
+[BF-1-LIQSWEEP] Enforced BrainSignal.measurements contract: Dict[str, float] only.
+               Removed nested/non-float entries and replaced categorical fields
+               with numeric codes + sentinels (-1.0 when not computed).
+
+Returns: BrainSignal (brain_contract.py)
 
 PATTERN:
   BUY:  Wick sweeps below a swing low → candle CLOSES ABOVE it → reversal
@@ -145,6 +170,7 @@ V1 → V2 CHANGES (retained, documented for audit trail)
 """
 from __future__ import annotations
 
+import math
 import pandas as pd
 import numpy as np
 from typing import Optional, List, Tuple, Dict
@@ -164,6 +190,11 @@ logger = structlog.get_logger()
 _MIN_SWEEP_DEPTH_ATR  = 0.25
 _MAX_SWEEP_DEPTH_ATR  = 1.50
 _MIN_SWEEP_DEPTH_PCT  = 0.002   # 0.2% absolute floor (price-relative)
+
+# [NF-1-LIQSWEEP] Minimum wick size floor (post-detection quality gate).
+# 730d baseline: wick_depth_atr < 0.3 had WR=0% (0W/6L). Blocking these reduces
+# low-quality "micro-sweeps" that do not meaningfully run liquidity.
+_MIN_WICK_SIZE_ATR    = 0.30
 
 # FIX-B: Level must be this far from current price
 # V5 LOCKED: 0.30 (from 0.50) — 270d grid: dist=0.3 best signal count at vol=1.5
@@ -230,6 +261,45 @@ _AGE_CONFIDENCE_DECAY = 0.05
 
 # Minimum data
 _MIN_HIST_BARS        = 100
+
+
+# ═══════════════════════════════════════════════════════════════
+# CONTRACT SAFETY HELPERS
+# ═══════════════════════════════════════════════════════════════
+
+def _sf(value: object, fallback: float = -1.0) -> float:
+    """
+    Safe-float conversion for BrainSignal.measurements.
+    Contract: measurements values must be float (no str/bool/None/nested).
+    NaN is converted to fallback.
+    """
+    try:
+        f = float(value)  # type: ignore[arg-type]
+        return fallback if math.isnan(f) else f
+    except Exception:
+        return fallback
+
+
+def _decision_code(tag: str) -> float:
+    """
+    Stable numeric decision codes (keep floats for measurements contract).
+    NOTE: These are *diagnostic codes* only. Human-readable reasons remain in
+    primary_evidence / supporting_factors / contra_factors.
+    """
+    _MAP = {
+        'GATE_DATA': 1.0,
+        'GATE_CHAOS': 2.0,
+        'GATE_ZERO_ATR': 3.0,
+        'GATE_NO_SWEEP': 4.0,
+        'GATE_REGIME_DIR': 5.0,
+        'GATE_RSI_EXTREME': 6.0,
+        'GATE_PANIC_VOLUME': 7.0,
+        'GATE_LOW_VOLUME': 8.0,
+        'GATE_LOW_CONFIDENCE': 9.0,
+        'LIQUIDITY_SWEEP_BULLISH_SWEEP': 20.0,
+        'LIQUIDITY_SWEEP_BEARISH_SWEEP': 21.0,
+    }
+    return _MAP.get(tag, 0.0)
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -537,19 +607,29 @@ def liquidity_sweep_signal(
     _base = dict(
         brain_name='Liquidity-Sweep', specialization='Stop-Hunt Reversal Detector',
         method='Structural sweeps v5 (equity: regime-gated + vol-ceiling + touch-penalty)',
-        rr_t1_mult=2.0, rr_t2_mult=3.5, rr_sl_mult=_SL_BUFFER_ATR,
     )
 
     def _hold(reason, conf=0.30, df_key='GATE_HOLD', meas=None):
         price = float(hist['Close'].iloc[-1]) if len(hist) > 0 else 0.0
-        m = {'decision_factor': df_key, 'price_at_signal': round(price, 6), 'bars_used': len(hist)}
-        if meas:
-            m.update(meas)
+        m: Dict[str, float] = {
+            # A12 fields (numeric-only)
+            'decision_factor': _decision_code(df_key),
+            'price_at_signal': _sf(round(price, 6), 0.0),
+            'bars_used': _sf(len(hist), 0.0),
+            # placeholders for A12 completeness on early-return paths
+            'atr_at_signal': -1.0,
+            'atr_pct_at_signal': -1.0,
+        }
+        if isinstance(meas, dict):
+            # coerce any caller-provided measurements into float-only
+            for k, v in meas.items():
+                m[str(k)] = _sf(v)
         return BrainSignal(
             **_base, direction='HOLD', confidence=conf, signal_strength=0.0,
             signal_age_candles=0, primary_evidence=reason,
             supporting_factors=[], contra_factors=[],
             method_confidence=0.0, regime_suitability='LOW', measurements=m,
+            rr_t1_mult=None, rr_t2_mult=None, rr_sl_mult=None,
         )
 
     # ── Gates ─────────────────────────────────────────────────────────────────
@@ -581,11 +661,12 @@ def liquidity_sweep_signal(
         return _hold(
             f'No structural sweep (last {_SWEEP_CANDLE_LOOKBACK} candles)',
             0.40, 'GATE_NO_SWEEP', {
-                'rsi': round(rsi_val, 1), 'atr_at_signal': round(atr, 6),
+                'rsi': round(rsi_val, 1),
+                'atr_at_signal': round(atr, 6),
                 'atr_pct_at_signal': round(atr_pct * 100, 3),
-                'n_swing_highs': len(swing_levels['highs']),
-                'n_swing_lows':  len(swing_levels['lows']),
-                'bars_used': len(hist),
+                'n_swing_highs': float(len(swing_levels['highs'])),
+                'n_swing_lows':  float(len(swing_levels['lows'])),
+                'bars_used': float(len(hist)),
             },
         )
 
@@ -600,6 +681,22 @@ def liquidity_sweep_signal(
     direction = 'BUY' if bull_sweep else 'SELL'
     age       = sweep.get('candles_since_sweep', 0)
 
+    # [NF-1-LIQSWEEP] Quality gate: require the wick to be meaningfully sized.
+    # Backtest evidence (730d baseline): wick_depth_atr < 0.3 had WR=0% (0W/6L).
+    wick_key  = 'wick_depth_atr' if direction == 'BUY' else 'wick_height_atr'
+    wick_atr  = float(sweep.get(wick_key, 0.0) or 0.0)
+    if wick_atr < _MIN_WICK_SIZE_ATR:
+        return _hold(
+            f'Wick too small ({wick_atr:.2f}xATR < {_MIN_WICK_SIZE_ATR:.2f}xATR) — micro-sweep',
+            0.35, 'GATE_NO_SWEEP', {
+                'rsi': round(rsi_val, 1),
+                'atr_at_signal': round(atr, 6),
+                'wick_depth_atr': wick_atr if direction == 'BUY' else -1.0,
+                'wick_height_atr': wick_atr if direction == 'SELL' else -1.0,
+                'vol_ratio': -1.0,
+            },
+        )
+
     # ── V5: Regime directional gate (equity-specific) ─────────────────────────
     # BUY_TRENDING_DOWN: 180d n=4, WR=0.0%, avg_R=-1.000 — breakdown not reversal. BLOCKED.
     # SELL_TRENDING_DOWN: no equity evidence either way. Re-allowed in V5.
@@ -612,13 +709,13 @@ def liquidity_sweep_signal(
         return _hold(
             f'BUY blocked in {regime} — equity BUY sweeps require RANGING/VOLATILE',
             0.35, 'GATE_REGIME_DIR',
-            {'regime': regime, 'direction': direction},
+            {'regime_code': 1.0, 'direction_code': 1.0},
         )
     if direction == 'SELL' and regime not in _SELL_ALLOWED_REGIMES:
         return _hold(
             f'SELL blocked in {regime} — equity SELL sweeps require RANGING/VOLATILE/TRENDING_UP/TRENDING_DOWN',
             0.35, 'GATE_REGIME_DIR',
-            {'regime': regime, 'direction': direction},
+            {'regime_code': 1.0, 'direction_code': -1.0},
         )
 
     # ── FIX-G: RSI neutral gate ───────────────────────────────────────────────
@@ -706,6 +803,12 @@ def liquidity_sweep_signal(
         # Reason: zero equity evidence (n<20) that overused levels lose more
         contra.append(f'Overused level ({touches} touches)')
 
+    from market_agent.brain.fvg_brain import fvg_confluence_boost
+    fvg_boost = fvg_confluence_boost(hist, sweep['swept_level'], direction, atr)
+    if fvg_boost > 0:
+        cs += fvg_boost
+        confirmations.append(f'FVG confluence (+{fvg_boost:.0%})')
+
     # Delta flow
     if delta_confirms and delta_flow is not None:
         cs += 0.05; confirmations.append(f'Delta={delta_flow:+.2f}')
@@ -782,33 +885,37 @@ def liquidity_sweep_signal(
             'aged_signal':      age > 0,
         },
         measurements       = {
-            'entry_price':        round(price, 6),
-            'target_1':           round(target_1, 6),
-            'stop_loss':          round(stop_loss, 6),
-            'swept_level':        round(sweep['swept_level'], 6),
-            'wick_depth_atr':     round(wick_size, 3),
-            'close_pct':          round(close_pct, 3),
-            'level_age':          level_age,
-            'sweep_age':          age,
-            'vol_ratio':          round(vol_ratio, 2),
-            'rsi':                round(rsi_val, 1),
-            'touches':            touches,
-            'rr_achieved':        round(actual_rr, 2),
-            'delta_flow':         round(delta_flow, 3) if delta_flow is not None else 0.0,
-            'n_swing_highs':      len(swing_levels['highs']),
-            'n_swing_lows':       len(swing_levels['lows']),
-            'swing_levels': {
-                'highs': [round(p, 6) for p, _ in swing_levels['highs'][:5]],
-                'lows':  [round(p, 6) for p, _ in swing_levels['lows'][:5]],
-            },
-            'decision_factor':    f'LIQUIDITY_SWEEP_{sweep["type"]}',
-            'price_at_signal':    round(price, 6),
-            'atr_at_signal':      round(atr, 6),
-            'atr_pct_at_signal':  round(atr_pct * 100, 3),
-            'bars_used':          len(hist),
-            'indicator_1_name':   'vol_ratio',      'indicator_1_value': round(vol_ratio, 3),
-            'indicator_2_name':   'rsi',            'indicator_2_value': round(rsi_val, 1),
-            'indicator_3_name':   'wick_depth_atr', 'indicator_3_value': round(wick_size, 3),
+            # Trade levels (used by paper scout) — floats only
+            'entry_price':        _sf(round(price, 6), 0.0),
+            'target_1':           _sf(round(target_1, 6), -1.0),
+            'stop_loss':          _sf(round(stop_loss, 6), -1.0),
+
+            # Pattern geometry
+            'swept_level':        _sf(round(sweep['swept_level'], 6), -1.0),
+            'wick_depth_atr':     _sf(round(wick_size, 3), -1.0),
+            'close_pct':          _sf(round(close_pct, 3), -1.0),
+            'level_age':          _sf(level_age, -1.0),
+            'sweep_age':          _sf(age, -1.0),
+
+            # Confirmations
+            'vol_ratio':          _sf(round(vol_ratio, 2), -1.0),
+            'rsi':                _sf(round(rsi_val, 1), -1.0),
+            'touches':            _sf(touches, -1.0),
+            'delta_flow':         _sf(round(delta_flow, 3), 0.0) if delta_flow is not None else 0.0,
+
+            # Risk/Reward diagnostics
+            'rr_achieved':        _sf(round(actual_rr, 2), -1.0),
+
+            # A12 fields (numeric-only)
+            'decision_factor':    _decision_code(f'LIQUIDITY_SWEEP_{sweep["type"]}'),
+            'price_at_signal':    _sf(round(price, 6), 0.0),
+            'atr_at_signal':      _sf(round(atr, 6), -1.0),
+            'atr_pct_at_signal':  _sf(round(atr_pct * 100, 3), -1.0),
+            'bars_used':          _sf(len(hist), 0.0),
+
+            # Lightweight structural context (numeric only)
+            'n_swing_highs':      _sf(len(swing_levels['highs']), -1.0),
+            'n_swing_lows':       _sf(len(swing_levels['lows']), -1.0),
         },
         rr_t1_mult = round(t1_in_atr, 2),
         rr_t2_mult = round(t1_in_atr * 1.5, 2),

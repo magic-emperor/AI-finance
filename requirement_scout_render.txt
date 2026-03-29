@@ -1,0 +1,30 @@
+# ═══════════════════════════════════════════════════════════
+# Causal-Ensemble Paper Scout — Python Dependencies
+#
+# TARGET: Python 3.11.9
+# Set PYTHON_VERSION=3.11.9 in Render dashboard Environment tab.
+#
+# NO torch. NO heavy ML. Estimated RAM: ~160 MB
+# ═══════════════════════════════════════════════════════════
+
+# ── Data & Math ─────────────────────────────────────────────
+pandas==2.2.2
+yfinance==0.2.40
+
+# ── Breeze (ICICI Direct) -- Indian stocks only ──────────────
+breeze-connect==1.0.65
+
+# ── Database ────────────────────────────────────────────────
+sqlalchemy==2.0.31
+psycopg2-binary==2.9.9
+pgvector==0.3.2
+
+# ── Logging ─────────────────────────────────────────────────
+structlog==24.2.0
+
+# ── Environment ─────────────────────────────────────────────
+python-dotenv==1.0.1
+
+# ── HTTP / Network ───────────────────────────────────────────
+requests==2.32.3
+urllib3==2.2.2

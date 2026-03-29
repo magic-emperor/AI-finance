@@ -41,6 +41,34 @@ from market_agent.brain.brain_contract import BrainSignal
 # CONFIDENCE LEVEL DESCRIPTIONS
 # ═══════════════════════════════════════════════════════════════
 
+def _decision_tag(value) -> str:
+    """
+    [BF-1-LIQREASON] Liquidity-Sweep stores decision_factor as a float code
+    (measurements contract: Dict[str, float]). Convert back to a stable string
+    tag for human-readable explanations.
+    """
+    try:
+        code = float(value)
+    except Exception:
+        return str(value or "")
+
+    _REV = {
+        1.0: "GATE_DATA",
+        2.0: "GATE_CHAOS",
+        3.0: "GATE_ZERO_ATR",
+        4.0: "GATE_NO_SWEEP",
+        5.0: "GATE_REGIME_DIR",
+        6.0: "GATE_RSI_EXTREME",
+        7.0: "GATE_PANIC_VOLUME",
+        8.0: "GATE_LOW_VOLUME",
+        9.0: "GATE_LOW_CONFIDENCE",
+        20.0: "LIQUIDITY_SWEEP_BULLISH_SWEEP",
+        21.0: "LIQUIDITY_SWEEP_BEARISH_SWEEP",
+        0.0: "",
+    }
+    return _REV.get(code, str(value or ""))
+
+
 def _confidence_label(conf: float) -> str:
     if conf >= 0.85: return "VERY HIGH"
     if conf >= 0.75: return "HIGH"
@@ -101,7 +129,7 @@ def explain_signal(
     # ── HOLD REASON (early exit) ─────────────────────────────────────────────
     if direction == 'HOLD':
         reason      = signal.primary_evidence or "no reason provided"
-        gate_key    = m.get('decision_factor', '')
+        gate_key    = _decision_tag(m.get('decision_factor', ''))
         lines.append("WHY HOLD:")
         lines.append(_explain_hold_reason(reason, gate_key, m, regime))
         lines.append(sep)
@@ -586,7 +614,7 @@ def summarise_signal(
     d        = signal.direction
 
     if d == 'HOLD':
-        gate = m.get('decision_factor', signal.primary_evidence or 'unknown gate')
+        gate = _decision_tag(m.get('decision_factor', signal.primary_evidence or 'unknown gate'))
         return (
             f"[{time_str}] {symbol} HOLD — {gate} "
             f"(conf={signal.confidence:.0%} regime={regime})"

@@ -1,0 +1,177 @@
+{
+    "_meta": {
+        "last_updated": "2026-02-19T03:02:54.816465",
+        "version": "2.0.2",
+        "active_patch_id": null,
+        "governance": "Human-in-the-Loop (HITL)",
+        "notes": "v2: Strategy-aware targets. Scalp % based, Swing ATR based. All values auto-tunable by backtester."
+    },
+    "default": {
+        "rsi_period": 14,
+        "macd_fast": 12,
+        "macd_slow": 26,
+        "macd_signal": 9,
+        "atr_period": 14,
+        "stop_loss_multiplier": 1.5,
+        "take_profit_rr": 1.0,
+        "use_sentiment": true,
+        "accuracy_threshold": 55.0
+    },
+    "scalp": {
+        "t1_pct": 0.001,
+        "t2_pct": 0.002,
+        "sl_pct": 0.002,
+        "window_minutes": 30,
+        "notes": "Auto-optimized 2026-02-19T03:02:54.816465, accuracy=67.9%"
+    },
+    "swing": {
+        "t1_multiplier": 1.0,
+        "t2_multiplier": 1.5,
+        "sl_multiplier": 1.5,
+        "window_hours": 12,
+        "notes": "ATR-based for multi-hour/day holds"
+    },
+    "XAUUSD=X": {
+        "rsi_period": 9,
+        "macd_fast": 8,
+        "macd_slow": 21,
+        "macd_signal": 5,
+        "atr_period": 10,
+        "stop_loss_multiplier": 2.8,
+        "take_profit_rr": 2.0,
+        "reason": "Gold is volatile. Requires faster MACD but wider Stops.",
+        "_research_log": {
+            "last_update": "2026-02-08T14:24:20.772634",
+            "source": "SSRN: 'Gold Volatility Dynamics 2026'",
+            "confidence": 0.95
+        }
+    },
+    "BTC-USD": {
+        "rsi_period": 14,
+        "stop_loss_multiplier": 3.0,
+        "reason": "Crypto requires wider stops due to wick hunting.",
+        "_research_log": {
+            "source": "Crypto Volatility Index Study",
+            "confidence": 0.85,
+            "date": "2024-05-18"
+        }
+    },
+    "brain_confidence": {
+        "SMA-Crossover": 0.673,
+        "RSI-Momentum": 0.679,
+        "MACD-Signal": 0.677,
+        "Bollinger-Bounce": 0.684,
+        "Volume-Breakout": 0.688,
+        "Boss-Brain": 0.69
+    },
+    "symbol_accuracy": {
+        "ITC.NS": 69.1,
+        "HDFCBANK.NS": 65.3,
+        "RELIANCE.NS": 69.0,
+        "TATASTEEL.NS": 72.3,
+        "LT.NS": 64.8,
+        "ADANIENT.NS": 70.6,
+        "ADANIPORTS.NS": 67.2,
+        "NVDA": 65.3,
+        "GOOGL": 64.0,
+        "AAPL": 67.4,
+        "AMD": 71.2,
+        "BTC-USD": 67.2,
+        "GC=F": 72.1,
+        "GBPJPY=X": 71.2,
+        "USDJPY=X": 73.2,
+        "CL=F": 71.1
+    },
+    "last_training": "2026-02-14T19:17:04.270098",
+    "training_candles": 101933,
+    "ITC_NS": {
+        "last_triggered_train": "2026-02-20T13:33:24.523694",
+        "pre_train_accuracy": 0.0,
+        "post_train_accuracy": 70.0
+    },
+    "^NSEBANK": {
+        "last_triggered_train": "2026-02-20T13:33:28.017455",
+        "pre_train_accuracy": 0.0,
+        "post_train_accuracy": 70.8
+    },
+    "RELIANCE_NS": {
+        "last_triggered_train": "2026-02-23T00:24:17.405414",
+        "pre_train_accuracy": 0.0,
+        "post_train_accuracy": 69.5
+    },
+    "M&M_NS": {
+        "last_triggered_train": "2026-02-20T13:33:38.192025",
+        "pre_train_accuracy": 0.0,
+        "post_train_accuracy": 67.6
+    },
+    "ADANIENT_NS": {
+        "last_triggered_train": "2026-02-20T13:33:41.289535",
+        "pre_train_accuracy": 49.5,
+        "post_train_accuracy": 66.9
+    },
+    "ADANIPORTS_NS": {
+        "last_triggered_train": "2026-02-20T13:33:44.580997",
+        "pre_train_accuracy": 0.0,
+        "post_train_accuracy": 69.9
+    },
+    "NVDA": {
+        "last_triggered_train": "2026-02-20T13:33:47.682410",
+        "pre_train_accuracy": 5.0,
+        "post_train_accuracy": 67.0
+    },
+    "GOOGL": {
+        "last_triggered_train": "2026-02-20T13:33:51.056091",
+        "pre_train_accuracy": 2.8,
+        "post_train_accuracy": 68.1
+    },
+    "AAPL": {
+        "last_triggered_train": "2026-02-20T13:33:54.282939",
+        "pre_train_accuracy": 20.0,
+        "post_train_accuracy": 65.8
+    },
+    "AMD": {
+        "last_triggered_train": "2026-02-20T13:21:26.457113",
+        "pre_train_accuracy": 20.0,
+        "post_train_accuracy": 67.7
+    },
+    "BTC_USD": {
+        "last_triggered_train": "2026-02-23T00:24:29.123608",
+        "pre_train_accuracy": 23.8,
+        "post_train_accuracy": 68.0
+    },
+    "GC=F": {
+        "last_triggered_train": "2026-02-23T00:24:36.011893",
+        "pre_train_accuracy": 0.0,
+        "post_train_accuracy": 72.3
+    },
+    "GBPJPY=X": {
+        "last_triggered_train": "2026-02-23T00:24:43.806735",
+        "pre_train_accuracy": 0.0,
+        "post_train_accuracy": 60.5
+    },
+    "USDJPY=X": {
+        "last_triggered_train": "2026-02-20T20:49:32.029735",
+        "pre_train_accuracy": 0.0,
+        "post_train_accuracy": 61.1
+    },
+    "CL=F": {
+        "last_triggered_train": "2026-03-09T18:16:13.584336",
+        "pre_train_accuracy": 0.0,
+        "post_train_accuracy": 67.5
+    },
+    "HDFCBANK_NS": {
+        "last_triggered_train": "2026-02-20T13:33:31.316636",
+        "pre_train_accuracy": 20.0,
+        "post_train_accuracy": 71.0
+    },
+    "TATASTEEL_NS": {
+        "last_triggered_train": "2026-02-20T13:33:35.152379",
+        "pre_train_accuracy": 10.5,
+        "post_train_accuracy": 65.9
+    },
+    "LT_NS": {
+        "last_triggered_train": "2026-02-20T03:41:23.989040",
+        "pre_train_accuracy": 11.1,
+        "post_train_accuracy": 70.5
+    }
+}

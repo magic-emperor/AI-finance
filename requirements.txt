@@ -1,0 +1,33 @@
+# Recommended: Python 3.11+
+pandas>=2.0.0
+numpy>=1.24.0
+yfinance>=0.2.0
+psycopg2-binary>=2.9.0
+sqlalchemy>=2.0.0
+structlog>=23.0.0
+torch
+torchvision
+torchaudio
+playwright
+beautifulsoup4
+requests
+scipy
+statsmodels
+pyyaml
+googlesearch-python
+sentence-transformers
+pgvector
+feedparser
+telethon
+python-dotenv
+websockets
+smartapi-python
+praw
+pyotp
+google-generativeai
+streamlit>=1.30.0
+faiss-cpu
+pytest
+graphviz>=0.20.0
+# Note: For causal/network graphs you also need Graphviz binaries on your PATH.
+# Install from https://graphviz.org/download/apscheduler>=3.10.4

@@ -45,11 +45,15 @@ import structlog
 import pandas as pd
 import requests
 import yfinance as yf
+from zoneinfo import ZoneInfo
 
 # Load .env file when running locally
 try:
     from dotenv import load_dotenv
-    load_dotenv()
+    # [BF-3-LIQSCOUT] Always override process env with local .env when running
+    # locally. Otherwise a stale/blank SCRAPER_API_KEY in the parent environment
+    # silently wins and causes ScraperAPI 401s even after you update `.env`.
+    load_dotenv(override=True)
 except ImportError:
     pass
 
@@ -101,25 +105,49 @@ def _is_market_open(symbol: str) -> bool:
     Returns True only when the relevant exchange is open.
 
     Indian equities (.NS): Mon-Fri 09:15-15:30 IST (03:45-10:00 UTC)
-    US equities:           Mon-Fri 09:30-16:00 ET  (13:30-20:00 UTC)
+    US equities:           Mon-Fri 09:30-16:00 America/New_York (DST-aware)
     """
     now_utc = datetime.now(timezone.utc)
 
     if ".NS" in symbol or ".BO" in symbol:
-        IST     = timezone(timedelta(hours=5, minutes=30))
-        now_ist = now_utc.astimezone(IST)
+        now_ist = now_utc.astimezone(ZoneInfo("Asia/Kolkata"))
         if now_ist.weekday() >= 5:
             return False
         t = now_ist.hour * 60 + now_ist.minute
         return (9 * 60 + 15) <= t <= (15 * 60 + 30)
 
-    # US equities — using EDT (UTC-4) year-round for simplicity
-    ET     = timezone(timedelta(hours=-4))
-    now_et = now_utc.astimezone(ET)
+    # US equities — DST-aware Eastern time
+    now_et = now_utc.astimezone(ZoneInfo("America/New_York"))
     if now_et.weekday() >= 5:
         return False
     t = now_et.hour * 60 + now_et.minute
     return (9 * 60 + 30) <= t <= (16 * 60)
+
+
+def _exchange_tz(symbol: str) -> ZoneInfo:
+    """Exchange-local timezone for log display and session interpretation."""
+    if ".NS" in symbol or ".BO" in symbol:
+        return ZoneInfo("Asia/Kolkata")
+    return ZoneInfo("America/New_York")
+
+
+def _as_utc(ts) -> datetime:
+    """
+    Normalize a pandas Timestamp/datetime to tz-aware UTC.
+    If ts is tz-naive, we treat it as UTC (conservative for yfinance 1h behavior).
+    """
+    if ts is None:
+        return datetime.now(timezone.utc)
+    try:
+        dt = ts.to_pydatetime() if hasattr(ts, "to_pydatetime") else ts
+    except Exception:
+        dt = ts
+    if isinstance(dt, datetime):
+        if dt.tzinfo is None:
+            return dt.replace(tzinfo=timezone.utc)
+        return dt.astimezone(timezone.utc)
+    # fallback
+    return datetime.now(timezone.utc)
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -149,7 +177,7 @@ def _scraper_quota_ok() -> bool:
 
 def _fetch_scraperapi(symbol: str) -> Optional[pd.DataFrame]:
     global _scraper_calls
-    api_key = os.getenv("SCRAPER_API_KEY", "")
+    api_key = (os.getenv("SCRAPER_API_KEY", "") or "").strip().strip('"').strip("'")
     if not api_key or not _scraper_quota_ok():
         return None
 
@@ -170,6 +198,59 @@ def _fetch_scraperapi(symbol: str) -> Optional[pd.DataFrame]:
             timeout=20,
         )
         if resp.status_code != 200:
+            logger.warning(
+                "scraper_http_error",
+                symbol=symbol,
+                status=resp.status_code,
+                key_len=len(api_key),
+                hint="ScraperAPI proxy request failed (Yahoo chart).",
+            )
+
+            # [BF-4-LIQSCOUT] Some ScraperAPI keys work on the API endpoint but
+            # not on the proxy endpoint. Fallback to the official API wrapper.
+            if resp.status_code in (401, 403):
+                try:
+                    api_resp = requests.get(
+                        "https://api.scraperapi.com/",
+                        params={
+                            "api_key": api_key,
+                            "url": url + f"?interval={DATA_INTERVAL}&range={yf_range}",
+                            "render": "false",
+                            "country_code": "in" if (".NS" in symbol or ".BO" in symbol) else "us",
+                        },
+                        headers={"User-Agent": "Mozilla/5.0"},
+                        timeout=30,
+                    )
+                    if api_resp.status_code == 200 and api_resp.text:
+                        # The API endpoint returns the upstream body directly.
+                        data = api_resp.json()
+                        result = data.get("chart", {}).get("result")
+                        if result:
+                            result     = result[0]
+                            timestamps = result.get("timestamp", [])
+                            ohlcv      = result.get("indicators", {}).get("quote", [{}])[0]
+                            if timestamps and ohlcv.get("close"):
+                                df = pd.DataFrame({
+                                    "Open":   ohlcv.get("open",   [None] * len(timestamps)),
+                                    "High":   ohlcv.get("high",   [None] * len(timestamps)),
+                                    "Low":    ohlcv.get("low",    [None] * len(timestamps)),
+                                    "Close":  ohlcv.get("close",  [None] * len(timestamps)),
+                                    "Volume": ohlcv.get("volume", [0]    * len(timestamps)),
+                                }, index=pd.to_datetime(timestamps, unit="s", utc=True))
+                                df.dropna(inplace=True)
+                                if len(df) >= 100:
+                                    _scraper_calls += 1
+                                    logger.info("data_ok", symbol=symbol, bars=len(df), tier="T1-scraperapi-api")
+                                    return df
+                    else:
+                        logger.warning(
+                            "scraper_api_http_error",
+                            symbol=symbol,
+                            status=api_resp.status_code,
+                            head=(api_resp.text[:120] if api_resp.text else ""),
+                        )
+                except Exception as e:
+                    logger.debug("scraper_api_failed", symbol=symbol, error=str(e)[:80])
             return None
 
         data   = resp.json()
@@ -190,7 +271,7 @@ def _fetch_scraperapi(symbol: str) -> Optional[pd.DataFrame]:
             "Low":    ohlcv.get("low",    [None] * len(timestamps)),
             "Close":  ohlcv.get("close",  [None] * len(timestamps)),
             "Volume": ohlcv.get("volume", [0]    * len(timestamps)),
-        }, index=pd.to_datetime(timestamps, unit="s"))
+        }, index=pd.to_datetime(timestamps, unit="s", utc=True))
         df.dropna(inplace=True)
 
         if len(df) < 100:
@@ -277,6 +358,12 @@ def _fetch_breeze(symbol: str) -> Optional[pd.DataFrame]:
             "Low": "min",    "Close": "last", "Volume": "sum",
         }).dropna()
 
+        # Breeze datetimes are exchange-local; normalize to UTC for consistent internal handling.
+        if df.index.tz is None:
+            df.index = df.index.tz_localize(ZoneInfo("Asia/Kolkata")).tz_convert(timezone.utc)
+        else:
+            df.index = df.index.tz_convert(timezone.utc)
+
         return df if len(df) >= 100 else None
 
     except ImportError:
@@ -307,36 +394,26 @@ def _fetch_yfinance_plain(symbol: str) -> Optional[pd.DataFrame]:
       1. tz_convert(None) instead of tz_localize(None) — tz_localize raises
          TypeError on already-tz-aware DatetimeIndex (pandas ≥ 1.5).
       2. Explicit bar-count log so the caller can see WHY None was returned.
-      3. Session-level User-Agent spoof via yf.set_tz_cache_location is not
-         enough — we pass a requests Session with browser headers so Yahoo
-         is less likely to block the initial metadata call.
+      3. [BF-2-LIQSCOUT] Remove custom requests session injection. Newer
+         yfinance versions use curl_cffi internally and reject a requests.Session
+         (breaks local paper scout).
     """
     import warnings
 
-    # ── attempt 1: yfinance with a spoofed session ───────────────────────
+    # ── attempt 1: yfinance default client ───────────────────────────────
     try:
-        session = requests.Session()
-        session.headers.update({
-            "User-Agent": (
-                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-                "AppleWebKit/537.36 (KHTML, like Gecko) "
-                "Chrome/122.0.0.0 Safari/537.36"
-            ),
-            "Accept":          "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-            "Accept-Language": "en-US,en;q=0.5",
-            "Accept-Encoding": "gzip, deflate, br",
-        })
-
         with warnings.catch_warnings():
             warnings.simplefilter("ignore")
-            ticker = yf.Ticker(symbol, session=session)
+            ticker = yf.Ticker(symbol)
             df     = ticker.history(period=DATA_PERIOD, interval=DATA_INTERVAL)
 
         if df is not None and not df.empty:
-            # FIX: tz_convert(None) strips tz info from aware index;
-            #      tz_localize(None) throws TypeError if tz is already set.
-            if df.index.tz is not None:
-                df.index = df.index.tz_convert(None)
+            # Normalize to tz-aware UTC internally for consistent interpretation.
+            if df.index.tz is None:
+                # yfinance can return tz-naive indexes; treat as UTC (matches common 1h behavior).
+                df.index = df.index.tz_localize(timezone.utc)
+            else:
+                df.index = df.index.tz_convert(timezone.utc)
             df = df[["Open", "High", "Low", "Close", "Volume"]].copy()
             df.dropna(inplace=True)
             if len(df) >= 100:
@@ -418,7 +495,7 @@ def _fetch_yfinance_plain(symbol: str) -> Optional[pd.DataFrame]:
             "Low":    ohlcv.get("low",    [None] * len(timestamps)),
             "Close":  ohlcv.get("close",  [None] * len(timestamps)),
             "Volume": ohlcv.get("volume", [0]    * len(timestamps)),
-        }, index=pd.to_datetime(timestamps, unit="s"))
+        }, index=pd.to_datetime(timestamps, unit="s", utc=True))
         df.dropna(inplace=True)
 
         if len(df) < 100:
@@ -558,11 +635,14 @@ class SessionTracker:
     def __init__(self):
         self.signals: List[Dict] = []
 
-    def record(self, symbol, direction, entry, t1, sl, regime, conf, reason):
+    def record(self, symbol, direction, entry, t1, sl, regime, conf, reason, bar_time_utc: Optional[datetime] = None):
         sl_dist = abs(entry - sl)
         rr = round(abs(t1 - entry) / sl_dist, 2) if sl_dist > 0 else 0.0
+        # Display time in exchange-local tz for readability
+        bt_utc = bar_time_utc or datetime.now(timezone.utc)
+        bt_loc = bt_utc.astimezone(_exchange_tz(symbol))
         self.signals.append({
-            "time": datetime.now().strftime("%H:%M"), "symbol": symbol,
+            "time": bt_loc.strftime("%H:%M"), "symbol": symbol,
             "direction": direction, "entry": entry, "t1": t1, "sl": sl,
             "rr": rr, "regime": regime, "conf": round(conf, 2),
             "reason": reason[:80] if reason else "",
@@ -717,10 +797,12 @@ def _run_scan_cycle(storage, tracker: SessionTracker,
             continue
 
         # ── 7. Log plain-English reasoning ──────────────────────
+        bar_time_utc = _as_utc(hist.index[-1]) if len(hist.index) else datetime.now(timezone.utc)
+        bar_time_loc = bar_time_utc.astimezone(_exchange_tz(symbol))
+
         if reasoning_fn is not None:
             try:
-                bar_time    = hist.index[-1]
-                explanation = reasoning_fn(brain_signal, symbol, regime, bar_time)
+                explanation = reasoning_fn(brain_signal, symbol, regime, bar_time_loc)
                 print(f"\n{'─'*60}")
                 print(explanation)
             except Exception as le:
@@ -788,13 +870,15 @@ def _run_scan_cycle(storage, tracker: SessionTracker,
             new_signals += 1
             tracker.record(symbol, brain_signal.direction, entry,
                            target_1, stop_loss, regime, eff_conf,
-                           brain_signal.primary_evidence or "")
+                           brain_signal.primary_evidence or "",
+                           bar_time_utc=bar_time_utc)
 
             print(f"\n  🟢 SIGNAL STORED [{sig_id}]")
             print(f"     {symbol:<15}  {brain_signal.direction:<4}  "
                   f"@ {entry:.4g}  T1={target_1:.4g}  SL={stop_loss:.4g}  "
                   f"RR={rr:.1f}  regime={regime}  conf={eff_conf:.2f}")
             print(f"     Evidence: {brain_signal.primary_evidence or 'N/A'}")
+            print(f"     Candle: {bar_time_loc.strftime('%Y-%m-%d %H:%M %Z')}  |  UTC: {bar_time_utc.strftime('%Y-%m-%d %H:%M %Z')}")
 
     return new_signals
 
