@@ -374,6 +374,77 @@ class BrainHealthMonitor:
         self._weights = weights
         return weights
 
+    def get_brain_weights_from_predictions(self, regime: str = None) -> Dict[str, float]:
+        """
+        Accuracy/regime-weighted vote multiplier, computed directly from
+        brain_predictions - the table the live P4 council vote in
+        watchlist_scanner.py actually writes to and resolves outcomes into.
+
+        Deliberately separate from get_brain_weights() above: that method
+        goes through SignalResolver.get_accuracy_stats(), which queries the
+        OLD signal_predictions table. That table's model_id values use
+        spaces ("Regime Ensemble") while ALL_BRAINS uses hyphens
+        ("Regime-Ensemble") - an exact-match filter that can never succeed -
+        and its regime values are entirely the deprecated HYBRID_SCAN /
+        VOLATILE_CHAOS taxonomy, not the current one. That combination means
+        get_brain_weights() has been silently returning neutral 1.0 for every
+        brain in the current 8-brain pipeline, regardless of regime, since
+        that pipeline's inception - not a partial gap, fully non-functional
+        for this purpose. This method reads the correct table with the
+        correct naming instead of trying to repair the old path.
+
+        Returns neutral 1.0 for any brain with fewer than
+        MIN_PREDICTIONS_FOR_JUDGMENT resolved (was_correct IS NOT NULL)
+        predictions - there usually won't be enough resolved history yet for
+        this to do anything other than return neutral weights across the
+        board, and that is the honest, correct behavior until real outcomes
+        accumulate. It is not a sign the query is broken.
+        """
+        weights = {brain: 1.0 for brain in ALL_BRAINS}
+
+        if not self.storage:
+            return weights
+
+        try:
+            from sqlalchemy import text
+            session = self.storage.Session()
+            try:
+                query = """
+                    SELECT brain_name,
+                           COUNT(*) AS total,
+                           SUM(CASE WHEN was_correct THEN 1 ELSE 0 END) AS wins
+                    FROM brain_predictions
+                    WHERE was_correct IS NOT NULL
+                """
+                params = {}
+                if regime:
+                    query += " AND regime = :regime"
+                    params['regime'] = regime
+                query += " GROUP BY brain_name"
+
+                for row in session.execute(text(query), params).fetchall():
+                    brain_name, total, wins = row
+                    if brain_name not in ALL_BRAINS:
+                        continue  # stale/legacy name from an older system generation - ignore
+                    if total < MIN_PREDICTIONS_FOR_JUDGMENT:
+                        continue  # not enough resolved history yet - stays at neutral 1.0
+                    acc_pct = 100.0 * wins / total
+                    # Same scale as get_brain_weights(): 0% -> 0.2, 50% -> 1.0, 80%+ -> 1.6
+                    weights[brain_name] = max(0.2, acc_pct / 50.0)
+            finally:
+                session.close()
+        except Exception as e:
+            logger.warning("get_brain_weights_from_predictions_failed", error=str(e)[:150])
+            return {brain: 1.0 for brain in ALL_BRAINS}
+
+        # Normalize so weights sum to len(ALL_BRAINS), matching get_brain_weights()'s convention
+        total_w = sum(weights.values())
+        if total_w > 0:
+            scale = len(ALL_BRAINS) / total_w
+            weights = {k: round(v * scale, 2) for k, v in weights.items()}
+
+        return weights
+
     def apply_weight_decay(self, decay_rate: float = 0.02) -> None:
         """
         Slowly decay all weights toward equal (1.0).

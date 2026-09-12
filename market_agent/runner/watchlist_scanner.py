@@ -1302,12 +1302,39 @@ def run_watchlist_scan():
                                 signals_stored += 1
                                 print(f"  {symbol}: {sig['direction']} @ {sig.get('entry_price', 0):.2f} ({sig.get('model_used', '')})")
 
-                        # P4: council consensus vote — majority rule, min 2 agreeing brains at conf >= 0.50
+                        # P4: council consensus vote.
+                        # Structural gate unchanged: still need >= 2 brains independently at
+                        # conf >= 0.50 on the same side before a verdict can fire at all - a
+                        # single very-confident brain still cannot force a trade alone.
+                        # What changed: which side WINS when both sides clear that gate is now
+                        # an accuracy/regime-weighted score, not a raw brain count. Weights come
+                        # from get_brain_weights_from_predictions() (health_monitor.py) - reads
+                        # brain_predictions directly, since that is what this loop actually
+                        # writes to and resolves outcomes into. Until enough resolved history
+                        # accumulates per brain (MIN_PREDICTIONS_FOR_JUDGMENT), every brain is
+                        # neutral (1.0) and this reduces to the same behavior as before.
                         _buy  = [s for s in brain_sigs if s.get('direction') == 'BUY'  and float(s.get('confidence', 0)) >= 0.50]
                         _sell = [s for s in brain_sigs if s.get('direction') == 'SELL' and float(s.get('confidence', 0)) >= 0.50]
-                        if len(_buy) > len(_sell) and len(_buy) >= 2:
-                            _consensus, _vote_sigs = 'BUY',  _buy
-                        elif len(_sell) > len(_buy) and len(_sell) >= 2:
+                        _vote_regime = brain_sigs[0].get('regime', 'RANGING') if brain_sigs else 'RANGING'
+                        try:
+                            from market_agent.brain.health_monitor import get_health_monitor
+                            _brain_weights = get_health_monitor().get_brain_weights_from_predictions(regime=_vote_regime)
+                        except Exception as _bw_err:
+                            logger.debug('brain_weight_lookup_failed', symbol=symbol, error=str(_bw_err)[:80])
+                            _brain_weights = {}
+                        _weighted_buy  = sum(_brain_weights.get(s.get('model_used', ''), 1.0) * float(s.get('confidence', 0)) for s in _buy)
+                        _weighted_sell = sum(_brain_weights.get(s.get('model_used', ''), 1.0) * float(s.get('confidence', 0)) for s in _sell)
+                        if len(_buy) >= 2 and len(_sell) >= 2:
+                            # Both sides cleared the structural gate — weighted score breaks the tie.
+                            if _weighted_buy > _weighted_sell:
+                                _consensus, _vote_sigs = 'BUY', _buy
+                            elif _weighted_sell > _weighted_buy:
+                                _consensus, _vote_sigs = 'SELL', _sell
+                            else:
+                                _consensus, _vote_sigs = None, []
+                        elif len(_buy) >= 2:
+                            _consensus, _vote_sigs = 'BUY', _buy
+                        elif len(_sell) >= 2:
                             _consensus, _vote_sigs = 'SELL', _sell
                         else:
                             _consensus, _vote_sigs = None, []
