@@ -85,7 +85,6 @@ setup_git.ps1
 # ══════════════════════════════════════════════
 .gemini/
 .agent/
-brain/
 .vscode/
 .idea/
 *.swp

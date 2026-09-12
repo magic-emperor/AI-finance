@@ -24,7 +24,7 @@ import time
 from market_agent.data.storage.postgres import PostgresStorage
 from market_agent.models.advanced_models import AMVLSTMModel
 from market_agent.models.multi_timeframe_model import MultiTimeframeModel
-from market_agent.models.causal_ensemble import RLEnsembleWeighter
+from market_agent.models.causal_rl_models import RLEnsembleWeighter
 from market_agent.models.preprocessing import DataPreprocessor
 
 logger = structlog.get_logger()

@@ -17,7 +17,7 @@ import numpy as np
 import pandas as pd
 import yfinance as yf
 import structlog
-from market_agent.models.causal_ensemble import RLEnsembleWeighter
+from market_agent.models.causal_rl_models import RLEnsembleWeighter
 
 # Define locally to avoid circular imports or missing exports
 TRAINING_SYMBOLS = ["BTC-USD", "ETH-USD", "NVDA", "AMD", "AAPL", "MSFT"]

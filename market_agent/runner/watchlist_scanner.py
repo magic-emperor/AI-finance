@@ -844,17 +844,18 @@ def run_learning_cycle(storage: PostgresStorage, resolver: SignalResolver,
 # 4. OBSERVE — News + Analysis from ALL sources
 # ═══════════════════════════════════════════════════════════
 
-def run_analyst_observation(symbol: str, storage: PostgresStorage, hist=None):
+def run_analyst_observation(symbol: str, storage: PostgresStorage, hist=None) -> dict:
     """
     GEMINIIFLOW: Reads news sentiment from NewsCache — ZERO Gemini calls here.
 
-    The NewsWatcher (started in app.py) polls RSS feeds every 2 minutes and
-    calls Gemini ONLY when headlines actually change for a symbol. This function
-    reads the already-scored result from cache and returns immediately.
+    The NewsWatcher (started in headless scanner or app.py) polls RSS feeds every
+    2 minutes and calls Gemini ONLY when headlines actually change for a symbol.
+    This function reads the already-scored result from cache and returns it.
 
-    Falls back to neutral 0.0 if the watcher hasn't been initialized yet
-    (e.g., running in headless mode without the dashboard).
+    Returns sentiment dict: {sentiment, summary, headlines, fresh}
+    Falls back to neutral 0.0 if the watcher hasn't been initialized yet.
     """
+    sentiment_ctx = {"sentiment": 0.0, "summary": "", "headlines": [], "fresh": False}
     try:
         from market_agent.watchers.news_watcher import get_news_cache
         news_cache = get_news_cache()
@@ -865,6 +866,8 @@ def run_analyst_observation(symbol: str, storage: PostgresStorage, hist=None):
             summary    = ctx.get("summary", "")
             headlines  = ctx.get("headlines", [])
             fresh      = ctx.get("fresh", False)
+            sentiment_ctx = {"sentiment": sentiment, "summary": summary,
+                             "headlines": headlines, "fresh": fresh}
             print(
                 f"    Analyst (cache): sentiment={sentiment:.2f}, "
                 f"headlines={len(headlines)}, fresh={fresh}, summary={summary[:60]}"
@@ -878,6 +881,7 @@ def run_analyst_observation(symbol: str, storage: PostgresStorage, hist=None):
 
     # Also pull additional news from dedicated scrapers (per-source rate limits, no Gemini)
     _fetch_additional_news(symbol, storage)
+    return sentiment_ctx
 
 
 
@@ -1077,7 +1081,7 @@ def run_watchlist_scan():
         from market_agent.config import NEURAL_MODELS, MODELS_DIR
         from market_agent.models.micro_price_nn import MicroPriceNN
         from market_agent.models.preprocessing import DataPreprocessor
-        from market_agent.models.causal_ensemble import RLEnsembleWeighter
+        from market_agent.models.causal_rl_models import RLEnsembleWeighter
         import torch
         import os
         import json
@@ -1137,6 +1141,40 @@ def run_watchlist_scan():
     resolver = regret.signal_resolver or SignalResolver(storage)
     engine = SignalEngine()
 
+    # N1a: Start NewsWatcher in headless scanner mode (no dashboard required)
+    # Uses same gemini_scorer as app.py — Gemini called only when headlines change.
+    try:
+        import json as _nw_json
+        import re as _nw_re
+        from market_agent.watchers.news_watcher import start_news_watcher, get_news_cache as _get_nc
+        if not _get_nc():  # Only start if not already running
+            def _headless_gemini_scorer(symbol: str, headlines: list) -> tuple:
+                from market_agent.brain.gemini_client import gemini_client
+                titles = [h['title'] for h in headlines[:8] if h.get('title')]
+                joined = "\n".join(f"{i+1}. {t}" for i, t in enumerate(titles))
+                prompt = (
+                    f"Analyze the trading sentiment of these {symbol} news headlines.\n"
+                    f"Respond ONLY in JSON with no other text: "
+                    f'{"{"}"score": 0.0, "summary": "one sentence"{"}"}\n'
+                    f"score: -1.0 (very bearish) to +1.0 (very bullish), 0.0 = neutral\n\n"
+                    f"Headlines:\n{joined}"
+                )
+                try:
+                    raw  = gemini_client.call(prompt, max_tokens=120)
+                    m    = _nw_re.search(r'\{[^}]+\}', raw or '', _nw_re.DOTALL)
+                    data = _nw_json.loads(m.group())
+                    return float(data['score']), str(data.get('summary', ''))
+                except Exception:
+                    return 0.0, 'Sentiment scoring unavailable'
+            start_news_watcher(
+                symbols           = WATCHLIST,
+                gemini_scorer     = _headless_gemini_scorer,
+                poll_interval_sec = 120,
+            )
+            logger.info("news_watcher_started_headless", symbols=len(WATCHLIST))
+    except Exception as _nw_err:
+        logger.warning("news_watcher_headless_start_failed", error=str(_nw_err)[:120])
+
     # Create cortex ONCE per scan cycle — reused across learning + debate triggers
     try:
         from market_agent.brain.cortex import CortexGatekeeper
@@ -1189,18 +1227,186 @@ def run_watchlist_scan():
                         atr = path_a_hist["High"].sub(path_a_hist["Low"]).rolling(14).mean().iloc[-1]
                         if pd.isna(atr) or atr <= 0:
                             atr = current_price * 0.01
+                        from datetime import datetime as _dt
+
+                        # P5b: resolve open paper trades against current price before generating new signals
+                        # P6: after resolution, update brain_predictions outcomes for those sessions
+                        if storage and hasattr(storage, 'resolve_paper_signals'):
+                            try:
+                                _resolved_count = storage.resolve_paper_signals(symbol, current_price)
+                                if _resolved_count > 0:
+                                    logger.info('paper_signals_resolved', symbol=symbol, count=_resolved_count)
+                                    # P6: find which sessions just resolved and update their brain_predictions
+                                    try:
+                                        from market_agent.data.storage.postgres import PaperTradeSignal as _PTS
+                                        from datetime import timedelta as _td
+                                        _p6_sess = storage.Session()
+                                        try:
+                                            _recently = _p6_sess.query(_PTS).filter(
+                                                _PTS.symbol == symbol,
+                                                _PTS.resolved_at >= _dt.utcnow() - _td(minutes=5),
+                                                _PTS.strategy.isnot(None),
+                                            ).all()
+                                            for _pts in _recently:
+                                                _bp_list = storage.get_brain_predictions_for_session(_pts.strategy)
+                                                if not _bp_list:
+                                                    continue
+                                                _actual_dir = 'UP' if _pts.direction == 'BUY' else 'DOWN'
+                                                for _bp in _bp_list:
+                                                    if _bp.was_correct is not None:
+                                                        continue  # already resolved
+                                                    _correct = (
+                                                        (_pts.outcome == 'T1_HIT' and _bp.direction == _pts.direction) or
+                                                        (_pts.outcome == 'SL_HIT' and _bp.direction != _pts.direction and _bp.direction != 'HOLD')
+                                                    )
+                                                    storage.update_brain_prediction_outcome(
+                                                        _bp.id, _pts.outcome, _actual_dir, bool(_correct)
+                                                    )
+                                        finally:
+                                            _p6_sess.close()
+                                    except Exception as _p6_err:
+                                        logger.debug('brain_pred_outcome_update_failed', symbol=symbol, error=str(_p6_err)[:80])
+                            except Exception as _rps_err:
+                                logger.debug('resolve_paper_signals_failed', symbol=symbol, error=str(_rps_err)[:60])
+
                         tech_analysis = ta_engine.full_analysis(path_a_hist) if hasattr(ta_engine, "full_analysis") else {}
                         from market_agent.brain.signal_generators import generate_brain_signals
+                        import uuid as _uuid
+                        council_session_id = f"{symbol}_{_dt.utcnow().strftime('%Y%m%d_%H%M%S')}_{_uuid.uuid4().hex[:6]}"
+                        # P1: pass "RANGING" as default — generate_brain_signals() overrides this
+                        # internally via Regime-Ensemble (lines 1678-1691 of signal_generators.py).
+                        # "RANGING" is the honest fallback if Regime-Ensemble fails, not "PATH_A".
                         brain_sigs = generate_brain_signals(
-                            symbol, current_price, atr, path_a_hist, tech_analysis, regime="PATH_A"
+                            symbol, current_price, atr, path_a_hist, tech_analysis, regime="RANGING"
                         )
                         for sig in brain_sigs:
+                            # P3: store every brain decision in brain_predictions (including HOLD)
+                            # Needed for per-brain accuracy tracking — all outcomes matter.
+                            if storage and hasattr(storage, 'store_brain_prediction'):
+                                try:
+                                    storage.store_brain_prediction(
+                                        council_session_id=council_session_id,
+                                        brain_name=sig.get('model_used', 'Unknown'),
+                                        symbol=symbol,
+                                        direction=sig['direction'],
+                                        confidence=float(sig.get('confidence', 0.5)),
+                                        regime=sig.get('regime', 'RANGING'),
+                                        signal_strength=sig.get('signal_strength'),
+                                    )
+                                except Exception as _bp_err:
+                                    logger.debug('brain_prediction_store_failed', brain=sig.get('model_used'), error=str(_bp_err)[:60])
                             if sig.get("direction") in ("WAIT", None):
                                 continue
                             pred_id = resolver.store_signal(sig, strategy="Intraday (Scalp)")
                             if pred_id:
                                 signals_stored += 1
                                 print(f"  {symbol}: {sig['direction']} @ {sig.get('entry_price', 0):.2f} ({sig.get('model_used', '')})")
+
+                        # P4: council consensus vote — majority rule, min 2 agreeing brains at conf >= 0.50
+                        _buy  = [s for s in brain_sigs if s.get('direction') == 'BUY'  and float(s.get('confidence', 0)) >= 0.50]
+                        _sell = [s for s in brain_sigs if s.get('direction') == 'SELL' and float(s.get('confidence', 0)) >= 0.50]
+                        if len(_buy) > len(_sell) and len(_buy) >= 2:
+                            _consensus, _vote_sigs = 'BUY',  _buy
+                        elif len(_sell) > len(_buy) and len(_sell) >= 2:
+                            _consensus, _vote_sigs = 'SELL', _sell
+                        else:
+                            _consensus, _vote_sigs = None, []
+
+                        # ── N2e: MacroCircuitBreaker — route consensus signal ──
+                        # Runs AFTER council vote, BEFORE storing verdict/paper trade.
+                        # HALT state blocks signals that fight the crisis;
+                        # PASS signals aligned with crisis direction (opportunity).
+                        _macro_blocked = False
+                        _macro_reason  = ""
+                        if _consensus:
+                            try:
+                                from market_agent.learning.macro_circuit_breaker import get_macro_breaker
+                                _breaker = get_macro_breaker()
+                                _macro_state = _breaker.get_state()
+                                _avg_conf = (
+                                    float(sum(s.get('confidence', 0) for s in _vote_sigs) / len(_vote_sigs))
+                                    if _vote_sigs else 0.5
+                                )
+                                _routed_dir, _macro_reason = _breaker.route_signal(
+                                    _consensus, symbol, _avg_conf
+                                )
+                                if _routed_dir == 'HOLD':
+                                    _macro_blocked = True
+                                    logger.info('macro_filter_blocked',
+                                                symbol=symbol, direction=_consensus,
+                                                state=_macro_state.name,
+                                                reason=_macro_reason[:80])
+                                    # Store routing event to DB for post-mortem
+                                    if storage and hasattr(storage, 'store_macro_event'):
+                                        storage.store_macro_event(
+                                            state_triggered  = _macro_state.name,
+                                            vix_india        = _macro_state.vix_india,
+                                            vix_cboe         = _macro_state.vix_cboe,
+                                            crisis_type      = _macro_state.crisis_type,
+                                            severity         = _macro_state.crisis_severity,
+                                            truth_score      = _macro_state.crisis_truth,
+                                            symbol           = symbol,
+                                            signal_direction = _consensus,
+                                            routed_direction = 'HOLD',
+                                            routing_reason   = _macro_reason,
+                                            state_reason     = _macro_state.reason,
+                                        )
+                                    print(f"  {symbol}: MACRO BLOCKED ({_macro_state.name}) — {_macro_reason[:70]}")
+                                elif _macro_state.name != 'CLEAR':
+                                    # PASS but log it as crisis opportunity
+                                    logger.info('macro_filter_passed',
+                                                symbol=symbol, direction=_consensus,
+                                                state=_macro_state.name,
+                                                reason=_macro_reason[:80])
+                                    print(f"  {symbol}: MACRO PASS ({_macro_state.name}) — {_macro_reason[:70]}")
+                            except Exception as _mcb_err:
+                                logger.debug('macro_breaker_check_failed',
+                                             symbol=symbol, error=str(_mcb_err)[:80])
+
+                        if _consensus and not _macro_blocked and storage and hasattr(storage, 'store_council_verdict'):
+                            try:
+                                import json as _json
+                                _best = max(_vote_sigs, key=lambda s: float(s.get('confidence', 0)))
+                                _participants = [
+                                    {'brain': s.get('model_used', ''), 'direction': s.get('direction', ''),
+                                     'confidence': float(s.get('confidence', 0))}
+                                    for s in brain_sigs if s.get('direction') in ('BUY', 'SELL')
+                                ]
+                                storage.store_council_verdict(
+                                    symbol=symbol,
+                                    direction=_consensus,
+                                    entry_price=current_price,
+                                    target_1=_best.get('target_1'),
+                                    target_2=_best.get('target_2'),
+                                    stop_loss=_best.get('stop_loss'),
+                                    timeframe_min=_best.get('timeframe_min'),
+                                    participants_json=_json.dumps(_participants),
+                                    council_session_id=council_session_id,
+                                )
+                                logger.info('council_verdict_stored', symbol=symbol, direction=_consensus, votes=len(_vote_sigs))
+                            except Exception as _cv_err:
+                                logger.debug('council_verdict_store_failed', symbol=symbol, error=str(_cv_err)[:80])
+
+                        # P5a: store paper trade signal for the consensus decision
+                        # strategy=council_session_id links this back to brain_predictions for P6 resolution
+                        if _consensus and not _macro_blocked and _vote_sigs and storage and hasattr(storage, 'store_paper_signal'):
+                            try:
+                                _avg_conf = float(sum(s.get('confidence', 0) for s in _vote_sigs) / len(_vote_sigs))
+                                storage.store_paper_signal(
+                                    brain_name='Council-Consensus',
+                                    symbol=symbol,
+                                    direction=_consensus,
+                                    entry_price=current_price,
+                                    target_1=_best.get('target_1', current_price * (1.01 if _consensus == 'BUY' else 0.99)),
+                                    target_2=_best.get('target_2', current_price * (1.02 if _consensus == 'BUY' else 0.98)),
+                                    stop_loss=_best.get('stop_loss', current_price * (0.993 if _consensus == 'BUY' else 1.007)),
+                                    confidence=_avg_conf,
+                                    regime=_best.get('regime', 'RANGING'),
+                                    timeframe=str(_best.get('timeframe_min', 15)),
+                                    strategy=council_session_id,  # P6 linkage key
+                                )
+                            except Exception as _pa_err:
+                                logger.debug('paper_signal_store_failed', symbol=symbol, error=str(_pa_err)[:60])
 
                         # ── Orders 12-14: Wire Sentiment Oracle, FII/DII, PCR into Path A ──
                         # These are uncorrelated alpha signals stored alongside the 7 technical brains.
@@ -1210,12 +1416,21 @@ def run_watchlist_scan():
                                 sentiment_oracle_signal, get_fii_dii_signal, get_pcr_signal
                             )
                             from market_agent.research.news_aggregator import news_aggregator
+                            from market_agent.watchers.news_watcher import get_news_cache as _get_news_cache
 
                             # Sentiment Oracle (Brain 8)
-                            _news = news_aggregator.fetch_news(symbol, limit=10) if news_aggregator else []
-                            _headlines = [(n.get("title") or "")[:100] for n in _news if n.get("title")]
-                            _raw_sent = sum(n.get("sentiment_score", 0) for n in _news if n.get("sentiment_score") is not None)
-                            _sent_score = max(-1.0, min(1.0, _raw_sent / max(len(_news), 1)))
+                            # N1c: prefer Gemini-scored NewsCache over heuristic aggregator
+                            _nc = _get_news_cache()
+                            if _nc:
+                                _nc_ctx     = _nc.get_sentiment(symbol)
+                                _sent_score = float(_nc_ctx.get("sentiment", 0.0))
+                                _headlines  = [h[:100] for h in _nc_ctx.get("headlines", []) if h]
+                            else:
+                                # Fallback: heuristic aggregator (no Gemini, keyword scoring)
+                                _news = news_aggregator.fetch_news(symbol, limit=10) if news_aggregator else []
+                                _headlines = [(n.get("title") or "")[:100] for n in _news if n.get("title")]
+                                _raw_sent = sum(n.get("sentiment_score", 0) for n in _news if n.get("sentiment_score") is not None)
+                                _sent_score = max(-1.0, min(1.0, _raw_sent / max(len(_news), 1)))
                             sent_sig = sentiment_oracle_signal(_sent_score, _headlines)
                             if sent_sig.get("direction") not in ("HOLD", None):
                                 from market_agent.signal_params import (
