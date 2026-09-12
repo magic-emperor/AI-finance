@@ -36,6 +36,13 @@ Fixes applied vs previous version:
   FIX-11 store_ohlc source fallback changed from 'unknown' to verified source tag
   FIX-12 Added Binance geo-block detection with clear error message
   FIX-13 Batch store now uses session-level bulk insert for performance
+  FIX-14 Daily period extended 5y->10y to reach COVID (Feb-Apr 2020) crash and
+         the 2022 bear market; added '10y' to both Binance/Breeze period_days
+         maps (previously unmapped periods silently fell back to 365 days)
+  FIX-15 Breeze get_historical_data_v2 caps at ~1000 candles/call with no
+         pagination and does not error on truncation - detect a short return
+         vs. requested period and fall back to yfinance instead of silently
+         accepting a truncated "full" history
 """
 import argparse
 import logging
@@ -68,7 +75,12 @@ ALL_SYMBOLS = NSE_STOCKS + INDICES + US_STOCKS + CRYPTO + COMMODITIES + FOREX
 FETCH_SPEC = [
     # yfinance hard-caps 1h data at 730 days
     {'interval': '1h',  'period': '2y',  'label': 'intraday_2yr'},
-    {'interval': '1d',  'period': '5y',  'label': 'daily_5yr'},
+    # FIX-14: 5y didn't reach the COVID crash (Feb-Apr 2020) or the 2022 bear
+    # market from a 2026 rebuild date. 10y is supported natively by yfinance
+    # and was added explicitly to the Binance/Breeze period_days maps below
+    # (do NOT change this to 'max' - the custom fetchers silently default to
+    # 365 days via .get(period, 365) for any period string they don't recognize).
+    {'interval': '1d',  'period': '10y', 'label': 'daily_10yr'},
     {'interval': '15m', 'period': '60d', 'label': 'scalp_60d'},
     {'interval': '30m', 'period': '60d', 'label': 'swing_60d'},   # FIX-5
     # 5m: yfinance caps at 60 days; Breeze can go further for NSE
@@ -108,12 +120,14 @@ def _fetch_binance(symbol: str, interval: str, period: str) -> pd.DataFrame:
     Returns OHLCV DataFrame with naive UTC index, or empty DataFrame on failure.
     """
     # FIX-2: Added '2y': 730 — was missing, silently defaulted to 1y
+    # FIX-14: Added '10y' — was missing, would have silently defaulted to 1y
     period_days = {
         '60d': 60,
         '1y':  365,
         '2y':  730,   # FIX-2
         '3y':  365 * 3,
         '5y':  365 * 5,
+        '10y': 365 * 10,  # FIX-14
     }
     # FIX-3: Added '4h', '5m', '30m' — were missing, silently used '1h'
     interval_map = {
@@ -212,12 +226,14 @@ def _fetch_breeze(symbol: str, interval: str, period: str) -> pd.DataFrame:
         return pd.DataFrame()
 
     # FIX-8: Added '2y': 730
+    # FIX-14: Added '10y' — was missing, would have silently defaulted to 1y
     period_days = {
         '60d': 60,
         '1y':  365,
         '2y':  730,    # FIX-8
         '3y':  365 * 3,
         '5y':  365 * 5,
+        '10y': 365 * 10,  # FIX-14
     }
     # Breeze v2 API only supports: 1minute, 5minute, 30minute, 1day.
     # 15m, 1h, and 4h are NOT supported natively and must fall back.
@@ -273,6 +289,27 @@ def _fetch_breeze(symbol: str, interval: str, period: str) -> pd.DataFrame:
     df.index = pd.to_datetime(df.index)
     if hasattr(df.index, 'tz') and df.index.tz is not None:
         df.index = df.index.tz_convert(None)
+
+    # FIX-15: Breeze's get_historical_data_v2 caps out around 1000 candles per
+    # call with no pagination - it does NOT error when the requested period
+    # exceeds this, it just silently returns a truncated, more-recent-only
+    # window (confirmed: a 10y daily request returned exactly 1000 rows
+    # starting ~4 years back, not 10). Without this check, that truncated
+    # result would be silently accepted as "the full period" since it isn't
+    # empty - defeating the whole point of widening FETCH_SPEC's period.
+    # Detect truncation and return empty so the existing yfinance fallback in
+    # fetch_clean_history() kicks in instead of quietly under-delivering.
+    requested_start = datetime.utcnow() - timedelta(days=days)
+    actual_start     = df.index.min()
+    tolerance_days   = 15  # weekends/holidays slack
+    if (actual_start - requested_start).days > tolerance_days:
+        log.warning(
+            f'Breeze truncated {symbol} {interval}/{period}: requested back to '
+            f'{requested_start.date()}, only got back to {actual_start.date()} '
+            f'({len(df)} rows) — falling back to yfinance for full depth.'
+        )
+        return pd.DataFrame()
+
     return df
 
 
