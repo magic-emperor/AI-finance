@@ -50,6 +50,14 @@ Fixes applied vs previous version:
          legitimately running out of history (e.g. BTC-USD before Binance's
          2017-08 listing date) is correct and must not be discarded in favor
          of a lower-quality yfinance fetch just because it's "short."
+  FIX-17 Added 1m to FETCH_SPEC (period '8d') - previously 1m was not fetched
+         by this script at all, left entirely to a separate live-drip path
+         that had gone 5 months stale. 8d matches yfinance's actual hard cap
+         ("Only 8 days worth of 1m granularity data are allowed to be fetched
+         per request" - confirmed directly against the API) - there is no
+         real use case for years of 1-minute bars regardless, so 8d is used
+         consistently across all sources rather than letting Binance/Breeze
+         fetch a longer, inconsistent depth just because they technically can.
 """
 import argparse
 import logging
@@ -80,6 +88,16 @@ ALL_SYMBOLS = NSE_STOCKS + INDICES + US_STOCKS + CRYPTO + COMMODITIES + FOREX
 # For non-crypto: 4h is derived by resampling 1h in _resample_to_4h().
 # For crypto:     4h is fetched natively from Binance (see CRYPTO_EXTRA_SPECS).
 FETCH_SPEC = [
+    # FIX-17: 1m added. yfinance hard-caps 1m at 8 days ("Only 8 days worth of
+    # 1m granularity data are allowed to be fetched per request" - confirmed
+    # directly against the API, not assumed). Binance/Breeze can technically
+    # go deeper, but there is no real use case for years of 1-minute bars
+    # (that's ~1440 rows/symbol/day - a 60d request alone took several
+    # minutes to paginate through Binance) and no benefit to sourcing 1m
+    # differently per asset class - 8d is the honest, consistent ceiling.
+    # Previously 1m was not fetched by this script at all (see rebuild_db.py
+    # history) - it was left to a separate, long-stale live-drip path.
+    {'interval': '1m',  'period': '8d',  'label': 'scalp_1m_8d'},
     # yfinance hard-caps 1h data at 730 days
     {'interval': '1h',  'period': '2y',  'label': 'intraday_2yr'},
     # FIX-14: 5y didn't reach the COVID crash (Feb-Apr 2020) or the 2022 bear
@@ -128,7 +146,10 @@ def _fetch_binance(symbol: str, interval: str, period: str) -> pd.DataFrame:
     """
     # FIX-2: Added '2y': 730 — was missing, silently defaulted to 1y
     # FIX-14: Added '10y' — was missing, would have silently defaulted to 1y
+    # FIX-17: Added '8d' for the new 1m spec — same reason, would have
+    # silently defaulted to 365 days without this.
     period_days = {
+        '8d':  8,     # FIX-17
         '60d': 60,
         '1y':  365,
         '2y':  730,   # FIX-2
@@ -268,7 +289,9 @@ def _fetch_breeze(symbol: str, interval: str, period: str) -> pd.DataFrame:
 
     # FIX-8: Added '2y': 730
     # FIX-14: Added '10y' — was missing, would have silently defaulted to 1y
+    # FIX-17: Added '8d' for the new 1m spec
     period_days = {
+        '8d':  8,      # FIX-17
         '60d': 60,
         '1y':  365,
         '2y':  730,    # FIX-8
