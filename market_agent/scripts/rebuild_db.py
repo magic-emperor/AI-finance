@@ -43,6 +43,13 @@ Fixes applied vs previous version:
          pagination and does not error on truncation - detect a short return
          vs. requested period and fall back to yfinance instead of silently
          accepting a truncated "full" history
+  FIX-16 Same truncation risk as FIX-15 existed in _fetch_binance's pagination
+         loop (a rate-limited/errored page break returned partial data as if
+         complete, with no check). Fixed the same way, but ONLY treats a short
+         result as truncation when the loop broke due to an actual error -
+         legitimately running out of history (e.g. BTC-USD before Binance's
+         2017-08 listing date) is correct and must not be discarded in favor
+         of a lower-quality yfinance fetch just because it's "short."
 """
 import argparse
 import logging
@@ -150,7 +157,14 @@ def _fetch_binance(symbol: str, interval: str, period: str) -> pd.DataFrame:
     b_symbol = symbol.replace('-USD', 'USDT').replace('/', '').upper()
     end_ms   = int(datetime.utcnow().timestamp() * 1000)
     start_ms = int((datetime.utcnow() - timedelta(days=days)).timestamp() * 1000)
+    requested_start_ms = start_ms  # FIX-16: kept for truncation check below; start_ms is mutated during pagination
     all_rows = []
+    # FIX-16: distinguishes "stopped early because of an error/rate-limit"
+    # (a real truncation - should fall back to yfinance) from "stopped because
+    # we legitimately ran out of history" (e.g. BTC-USD requesting 10y but
+    # Binance only lists it from 2017-08 onward - NOT a bug, don't force a
+    # fallback just because the result is shorter than requested).
+    stopped_due_to_error = False
 
     while start_ms < end_ms:
         try:
@@ -171,10 +185,13 @@ def _fetch_binance(symbol: str, interval: str, period: str) -> pd.DataFrame:
                 return pd.DataFrame()
             if resp.status_code != 200:
                 log.warning(f'Binance HTTP {resp.status_code} for {b_symbol} — stopping fetch')
+                stopped_due_to_error = True
                 break
 
             rows = resp.json()
             if not rows or not isinstance(rows, list):
+                # Genuine exhaustion: Binance has nothing earlier than this for
+                # this symbol (e.g. before its listing date) - not an error.
                 break
 
             all_rows.extend(rows)
@@ -188,9 +205,11 @@ def _fetch_binance(symbol: str, interval: str, period: str) -> pd.DataFrame:
 
         except requests.exceptions.Timeout:
             log.warning(f'Binance timeout for {b_symbol} {b_interval} — stopping early')
+            stopped_due_to_error = True
             break
         except Exception as e:
             log.warning(f'Binance fetch error for {b_symbol}: {e}')
+            stopped_due_to_error = True
             break
 
     if not all_rows:
@@ -205,6 +224,28 @@ def _fetch_binance(symbol: str, interval: str, period: str) -> pd.DataFrame:
     df         = df.set_index('ts')[['open', 'high', 'low', 'close', 'volume']].astype(float)
     df.columns = ['Open', 'High', 'Low', 'Close', 'Volume']
     df.index   = df.index.tz_localize(None)
+
+    # FIX-16: same class of bug as FIX-15 (Breeze) - a rate-limited or
+    # otherwise early-terminated pagination loop returns whatever partial data
+    # it collected as a non-empty, "successful"-looking DataFrame, with no
+    # indication it's short of what was requested. Only treat a short result
+    # as truncation (and fall back to yfinance) when the loop actually broke
+    # due to an error - a short result from legitimately running out of
+    # history (e.g. BTC-USD before Binance's 2017-08 listing date) is correct
+    # and must NOT be discarded in favor of a lower-quality yfinance fetch.
+    if stopped_due_to_error:
+        requested_start = pd.Timestamp(requested_start_ms, unit='ms')
+        actual_start     = df.index.min()
+        tolerance_days   = 3  # pagination retry slack - crypto trades 24/7, no weekend gap to allow for
+        if (actual_start - requested_start).days > tolerance_days:
+            log.warning(
+                f'Binance truncated {b_symbol} {b_interval} (stopped early due to '
+                f'an error): requested back to {requested_start.date()}, only got '
+                f'back to {actual_start.date()} ({len(df)} rows) — falling back to '
+                f'yfinance for full depth.'
+            )
+            return pd.DataFrame()
+
     return df
 
 
