@@ -1140,7 +1140,13 @@ BRAIN_REGIME_GATES_UNIFIED = {
     'Causal-Ensemble':    ['RANGING', 'SQUEEZE', 'VOLATILE'],
     'Super-Brain':        ['TRENDING_UP', 'TRENDING_DOWN', 'RANGING'],
     'RL-Weighter':        ['TRENDING_UP', 'TRENDING_DOWN', 'RANGING'],
-    'Liquidity-Sweep':    ['VOLATILE', 'TRENDING_UP', 'TRENDING_DOWN'],
+    # RANGING included: the brain's own internal gate (liquidity_sweep.py
+    # _BUY_ALLOWED_REGIMES / _SELL_ALLOWED_REGIMES) already allows RANGING for
+    # both directions, evidenced and direction-aware. This external list was
+    # excluding RANGING entirely, silently discarding every RANGING signal
+    # the brain produced (measured: 18/100 signals in a sample run) before
+    # the brain's own, more precise regime logic ever got to apply.
+    'Liquidity-Sweep':    ['VOLATILE', 'TRENDING_UP', 'TRENDING_DOWN', 'RANGING'],
     'Regime-Ensemble':    ['ALL'],
 }
 

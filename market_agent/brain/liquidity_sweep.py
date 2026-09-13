@@ -187,7 +187,13 @@ logger = structlog.get_logger()
 # ═══════════════════════════════════════════════════════════════
 
 # Sweep depth (ATR multiples)
-_MIN_SWEEP_DEPTH_ATR  = 0.25
+# _MIN_SWEEP_DEPTH_ATR was 0.25, independently of _MIN_WICK_SIZE_ATR below —
+# but since 0.30 > 0.25, any sweep in [0.25, 0.30) ATR passed detection here
+# and was then rejected anyway by the post-detection wick-size gate, so this
+# threshold never independently changed behavior. Unified to the one value
+# that actually has backtest evidence behind it (see _MIN_WICK_SIZE_ATR)
+# instead of carrying two numbers that only one of them enforced.
+_MIN_SWEEP_DEPTH_ATR  = 0.30
 _MAX_SWEEP_DEPTH_ATR  = 1.50
 _MIN_SWEEP_DEPTH_PCT  = 0.002   # 0.2% absolute floor (price-relative)
 
@@ -296,10 +302,25 @@ def _decision_code(tag: str) -> float:
         'GATE_PANIC_VOLUME': 7.0,
         'GATE_LOW_VOLUME': 8.0,
         'GATE_LOW_CONFIDENCE': 9.0,
+        'GATE_ASSET_CLASS': 10.0,
         'LIQUIDITY_SWEEP_BULLISH_SWEEP': 20.0,
         'LIQUIDITY_SWEEP_BEARISH_SWEEP': 21.0,
     }
     return _MAP.get(tag, 0.0)
+
+
+# Exposed so external tooling (the backtester's decision log) can render the
+# numeric decision_factor back to its readable gate name without duplicating
+# this map. Codes are diagnostic; primary_evidence always carries the
+# human-readable reason regardless of this mapping.
+DECISION_CODE_TO_GATE = {
+    1.0: 'GATE_DATA', 2.0: 'GATE_CHAOS', 3.0: 'GATE_ZERO_ATR',
+    4.0: 'GATE_NO_SWEEP', 5.0: 'GATE_REGIME_DIR', 6.0: 'GATE_RSI_EXTREME',
+    7.0: 'GATE_PANIC_VOLUME', 8.0: 'GATE_LOW_VOLUME', 9.0: 'GATE_LOW_CONFIDENCE',
+    10.0: 'GATE_ASSET_CLASS',
+    20.0: 'LIQUIDITY_SWEEP_BULLISH_SWEEP', 21.0: 'LIQUIDITY_SWEEP_BEARISH_SWEEP',
+    0.0: 'UNKNOWN',
+}
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -596,6 +617,7 @@ def liquidity_sweep_signal(
     hist:   pd.DataFrame,
     symbol: str = "",
     regime: str = "VOLATILE",
+    swing_levels_override: Optional[Dict[str, List[Tuple[float, int]]]] = None,
 ) -> BrainSignal:
     """
     Liquidity Sweep Brain v3.
@@ -603,6 +625,14 @@ def liquidity_sweep_signal(
                    RELIANCE.NS, ITC.NS, AMD, GOOGL).
     NOT suitable for crypto H1 (trend-continuation instruments).
     Best TF: 1H, 4H, D1.
+
+    `swing_levels_override`: when supplied, skips computing swing levels from
+    `hist` and uses this dict instead (same shape as _find_swing_levels'
+    return value). Exists so a higher-timeframe level (e.g. from 30m bars)
+    can be combined with confirmation on `hist` at a lower timeframe (e.g.
+    5m) -- see liquidity_sweep_htf_ltf_signal(), which is the only current
+    caller. When None (every existing caller), behavior is identical to
+    before this parameter was added: levels come from `hist` itself.
     """
     _base = dict(
         brain_name='Liquidity-Sweep', specialization='Stop-Hunt Reversal Detector',
@@ -639,6 +669,18 @@ def liquidity_sweep_signal(
     if regime == 'CHAOS':
         return _hold('CHAOS regime — no clean structure', 0.25, 'GATE_CHAOS')
 
+    # This brain's own docstring states "NOT suitable for crypto H1" and cites
+    # its own backtest evidence (BTC/ETH H1: WR=25%, MaxDD=37R) -- but `symbol`
+    # was accepted and never read, so nothing enforced that exclusion and it
+    # was absent from BRAIN_SYMBOL_MAP, meaning it traded crypto anyway. This
+    # is a real gate now, not a claim in a comment nobody checks.
+    if symbol and any(k in symbol.upper() for k in ('-USD', 'USDT', 'BTC', 'ETH')):
+        return _hold(
+            f'{symbol}: crypto excluded — this brain\'s own H1 backtest showed '
+            f'WR=25%, MaxDD=37R (trend-continuation instrument, not mean-reverting)',
+            0.25, 'GATE_ASSET_CLASS',
+        )
+
     price = float(hist['Close'].iloc[-1])
     atr   = calc_atr(hist, period=14)
     if atr <= 0:
@@ -651,7 +693,8 @@ def liquidity_sweep_signal(
         rsi_val = 50.0
 
     # ── Structural levels (FIX-A: recency sort) ───────────────────────────────
-    swing_levels = _find_swing_levels(hist, _SWING_LOOKBACK, _PIVOT_BARS, price)
+    swing_levels = (swing_levels_override if swing_levels_override is not None
+                    else _find_swing_levels(hist, _SWING_LOOKBACK, _PIVOT_BARS, price))
 
     # ── Sweep detection ───────────────────────────────────────────────────────
     bull_sweep = _detect_bullish_sweep(hist, swing_levels['lows'],  atr, price)
@@ -760,7 +803,21 @@ def liquidity_sweep_signal(
 
     # ── Confidence scoring ────────────────────────────────────────────────────
     # base_conf: already passed all hard gates (regime, RSI, vol, touches, close)
-    base_conf = 0.65
+    #
+    # WAS 0.65, identical to _MIN_CONFIDENCE_GATE below, making that gate
+    # mathematically inert: `cs` below only ever adds (no confirmation ever
+    # subtracts from it -- the "contra" entries are logged for later analysis,
+    # not penalized, by deliberate earlier design), the age-decay path never
+    # fires because `age` is always 0 (_SWEEP_CANDLE_LOOKBACK=1 means only the
+    # current candle is ever examined), and the SQUEEZE-regime penalty is also
+    # unreachable because SQUEEZE is already excluded by the earlier regime
+    # direction gate. So confidence >= base_conf on every path that reaches
+    # here, and a base_conf equal to the gate meant the gate could never
+    # actually reject anything. Lowered to the same 0.50 neutral baseline
+    # used as the pass/fail threshold everywhere else in this system, so a
+    # signal must actually earn confirmation (volume quality, close strength,
+    # FVG confluence, etc.) to clear the 0.65 gate -- not start there for free.
+    base_conf = 0.50
     cs        = 0.0
     confirmations: List[str] = []
     contra:        List[str] = []
@@ -920,6 +977,65 @@ def liquidity_sweep_signal(
         rr_t1_mult = round(t1_in_atr, 2),
         rr_t2_mult = round(t1_in_atr * 1.5, 2),
         rr_sl_mult = round(risk_in_atr, 2),
+    )
+
+
+# ═══════════════════════════════════════════════════════════════
+# TWO-TIMEFRAME VARIANT — level from HTF, sweep+confirmation on LTF
+# ═══════════════════════════════════════════════════════════════
+
+_HTF_LTF_MINUTES = {
+    '1m': 1, '5m': 5, '15m': 15, '30m': 30, '1h': 60, '4h': 240, '1d': 1440,
+}
+
+
+def liquidity_sweep_htf_ltf_signal(
+    hist_htf:  pd.DataFrame,
+    hist_ltf:  pd.DataFrame,
+    symbol:    str = "",
+    regime:    str = "VOLATILE",
+    htf_label: str = "30m",
+    ltf_label: str = "5m",
+) -> BrainSignal:
+    """
+    Two-timeframe variant of the same hypothesis: mark the structural level
+    from the HIGHER timeframe (default 30m), then look for the sweep and
+    its confirming close-back-through on the LOWER timeframe (default 5m)
+    -- the method the brain's owner described trading by hand, as distinct
+    from liquidity_sweep_signal's single-timeframe design (level and sweep
+    both read off the same series).
+
+    Implementation: reuses _find_swing_levels on `hist_htf` for the level,
+    then calls liquidity_sweep_signal(hist_ltf, ..., swing_levels_override=...)
+    so every gate, confidence calculation and R:R rule downstream of "where
+    is the level" is IDENTICAL, byte-for-byte, to the validated single-
+    timeframe brain -- only the source of the level differs. This avoids
+    a second, divergent copy of ~250 lines of gate logic.
+
+    KNOWN APPROXIMATION (v1, stated plainly rather than hidden): swing-level
+    "age" from _find_swing_levels is counted in bars OF THE INPUT SERIES.
+    A level found 5 bars back in 30m data is ~2.5 hours old; the LTF gates
+    (_MIN_LEVEL_AGE_BARS, tuned against whatever timeframe hist normally is)
+    expect age in units of THAT series' bars. Age is rescaled here by the
+    HTF/LTF minute ratio (e.g. 30m/5m = 6x) so a "5-bar-old 30m level" is
+    treated as ~30 bars old in 5m terms -- a reasonable first approximation,
+    not a validated one. If backtest results look sensitive to this specific
+    conversion, that is the first place to revisit.
+    """
+    htf_min = _HTF_LTF_MINUTES.get(htf_label, 30)
+    ltf_min = _HTF_LTF_MINUTES.get(ltf_label, 5)
+    age_scale = max(1, htf_min // ltf_min)
+
+    price = float(hist_ltf['Close'].iloc[-1]) if len(hist_ltf) > 0 else 0.0
+    htf_levels = _find_swing_levels(hist_htf, _SWING_LOOKBACK, _PIVOT_BARS, price)
+    rescaled_levels = {
+        'highs': [(p, age * age_scale) for p, age in htf_levels['highs']],
+        'lows':  [(p, age * age_scale) for p, age in htf_levels['lows']],
+    }
+
+    return liquidity_sweep_signal(
+        hist_ltf, symbol=symbol, regime=regime,
+        swing_levels_override=rescaled_levels,
     )
 
 
