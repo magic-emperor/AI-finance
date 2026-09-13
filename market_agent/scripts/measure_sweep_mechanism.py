@@ -131,7 +131,16 @@ def detect_sweeps(df: pd.DataFrame, atr: pd.Series, is_pivot_high: pd.Series,
         if pd.isna(a) or a <= 0:
             continue
         window_start = max(0, i - lookback)
-        eligible_end = i - min_level_age  # levels must predate the signal bar
+        # A pivot at bar j is only KNOWABLE without lookahead once bar j+pivot_bars
+        # has been observed (the fractal check needs that many bars on its right
+        # side), i.e. once i >= j+pivot_bars, i.e. j <= i-pivot_bars. This was
+        # previously derived from min_level_age alone; on 2026-09-13's run
+        # min_level_age (5) happened to equal pivot_bars (5) so it was safe by
+        # coincidence, not by construction -- changing either constant
+        # independently would have silently introduced lookahead. Verified this
+        # did not affect that run's result before fixing it.
+        safe_age = max(min_level_age, PIVOT_BARS)
+        eligible_end = i - safe_age  # levels must predate the signal bar, safely
 
         c_low, c_high, c_close = df['Low'].iloc[i], df['High'].iloc[i], df['Close'].iloc[i]
 
