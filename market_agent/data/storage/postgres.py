@@ -469,6 +469,47 @@ class PaperTradeSignal(Base):
     )
 
 
+class MacroEvents(Base):
+    """
+    Macro Circuit Breaker Event Log (Phase N, N2d).
+    Records every MacroState change and signal routing decision.
+    Used for post-mortem analysis of how macro conditions affected trading.
+    """
+    __tablename__ = 'macro_events'
+
+    id              = Column(Integer, primary_key=True, autoincrement=True)
+    timestamp       = Column(DateTime, default=datetime.utcnow, nullable=False, index=True)
+
+    # Circuit breaker state at trigger
+    state_triggered = Column(String(10), nullable=False)   # CLEAR | WATCH | HALT
+    crisis_type     = Column(String(50), nullable=True)    # WAR_GEOPOLITICAL | NONE | ...
+    severity        = Column(String(20), nullable=True)    # NONE | LOW | MEDIUM | HIGH | CRITICAL
+    truth_score     = Column(Float,      nullable=True)    # 0.0–1.0 classifier confidence
+
+    # VIX snapshot at event time
+    vix_india       = Column(Float, nullable=True)
+    vix_cboe        = Column(Float, nullable=True)
+
+    # Routing outcome (per symbol per scan cycle)
+    symbol          = Column(String(30), nullable=True, index=True)
+    signal_direction= Column(String(10), nullable=True)    # BUY | SELL
+    routed_direction= Column(String(10), nullable=True)    # BUY | SELL | HOLD
+    routing_reason  = Column(String(255), nullable=True)
+
+    # Summary across full scan cycle
+    signals_blocked = Column(Integer, nullable=True, default=0)
+    signals_passed  = Column(Integer, nullable=True, default=0)
+
+    # Human-readable reason for state
+    state_reason    = Column(String(255), nullable=True)
+
+    __table_args__ = (
+        Index('idx_macro_events_time',   'timestamp'),
+        Index('idx_macro_events_state',  'state_triggered', 'timestamp'),
+        Index('idx_macro_events_symbol', 'symbol', 'timestamp'),
+    )
+
+
 class PostgresStorage:
     def __init__(self, connection_string=None):
         if not connection_string:
@@ -1409,6 +1450,67 @@ class PostgresStorage:
             session.rollback()
             logger.error("store_paper_signal_failed", error=str(e)[:120])
             return None
+        finally:
+            session.close()
+
+    def store_macro_event(
+        self,
+        state_triggered: str,
+        vix_india: float = 0.0,
+        vix_cboe: float = 0.0,
+        crisis_type: str = "NONE",
+        severity: str = "NONE",
+        truth_score: float = 0.0,
+        symbol: str = None,
+        signal_direction: str = None,
+        routed_direction: str = None,
+        routing_reason: str = None,
+        signals_blocked: int = 0,
+        signals_passed: int = 0,
+        state_reason: str = None,
+    ) -> Optional[int]:
+        """Store a macro circuit breaker event. Returns row ID or None."""
+        session = self.Session()
+        try:
+            row = MacroEvents(
+                state_triggered  = state_triggered,
+                vix_india        = vix_india,
+                vix_cboe         = vix_cboe,
+                crisis_type      = crisis_type,
+                severity         = severity,
+                truth_score      = truth_score,
+                symbol           = symbol,
+                signal_direction = signal_direction,
+                routed_direction = routed_direction,
+                routing_reason   = (routing_reason or "")[:255],
+                signals_blocked  = signals_blocked,
+                signals_passed   = signals_passed,
+                state_reason     = (state_reason or "")[:255],
+            )
+            session.add(row)
+            session.commit()
+            session.refresh(row)
+            return row.id
+        except Exception as e:
+            session.rollback()
+            logger.debug("store_macro_event_failed", error=str(e)[:80])
+            return None
+        finally:
+            session.close()
+
+    def get_recent_macro_events(self, hours: int = 24) -> list:
+        """Return macro events from the last N hours, newest first."""
+        session = self.Session()
+        try:
+            cutoff = datetime.utcnow() - timedelta(hours=hours)
+            return (
+                session.query(MacroEvents)
+                .filter(MacroEvents.timestamp >= cutoff)
+                .order_by(MacroEvents.timestamp.desc())
+                .all()
+            )
+        except Exception:
+            return []
         finally:
             session.close()
 
