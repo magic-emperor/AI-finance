@@ -62,11 +62,14 @@ Fixes applied vs previous version:
 import argparse
 import logging
 import time
+import hashlib
+import json
+import os
 import pandas as pd
 import yfinance as yf
 import requests
 from datetime import datetime, timedelta
-from market_agent.data.storage.postgres import PostgresStorage
+from market_agent.data.storage.postgres import PostgresStorage, normalize_bar_timestamp
 
 log = logging.getLogger('rebuild_db')
 
@@ -82,6 +85,99 @@ COMMODITIES = ['GC=F', 'CL=F']
 FOREX       = ['GBPJPY=X', 'USDJPY=X', 'INR=X']  # FIX-10: added INR=X
 
 ALL_SYMBOLS = NSE_STOCKS + INDICES + US_STOCKS + CRYPTO + COMMODITIES + FOREX
+
+
+def _asset_class(symbol: str) -> str:
+    if symbol in NSE_STOCKS or symbol in INDICES:
+        return 'NSE'
+    if symbol in CRYPTO:
+        return 'CRYPTO'
+    if symbol in COMMODITIES:
+        return 'COMMODITY'
+    if symbol in FOREX:
+        return 'FOREX'
+    if symbol in US_STOCKS:
+        return 'US'
+    return 'UNKNOWN'
+
+
+# ── SOURCE_PLAN (data rebuild work order Part 4, R2/R3) ──────────────────────
+# One row per (asset_class, interval), declared BEFORE any run starts, so
+# which vendor answers a given series is never a function of which token or
+# API happened to be alive that particular run. A pinned source that fails
+# means the series is SKIPPED and reported — never silently substituted.
+# Silent substitution (Breeze -> yfinance mid-run, both merged into the same
+# series) is exactly what let the same NSE trading day get stored twice
+# under two different price conventions (raw vs adjusted), ~24% apart.
+#
+# NSE-specific reasoning: Breeze natively serves only 1m/5m/30m/1d (never
+# 15m/1h/4h at all) and caps at ~1000 rows/call with no pagination, so for
+# anything Breeze cannot natively and fully serve, yfinance is the DECLARED
+# choice up front — not a fallback discovered at runtime. Daily is yfinance
+# ONLY: Breeze daily was the actual source of the ITC.NS corruption (raw
+# price, 1000-row cap), so daily is moved off Breeze entirely rather than
+# patched — that removes the ambiguity instead of managing it.
+#
+# 1m/5m/30m are ALSO pinned to yfinance, not Breeze, despite Breeze
+# supporting these natively. Checked before deciding: FETCH_SPEC requests
+# 1m@8d and 5m/30m@60d — both exactly at or within yfinance's own depth
+# ceiling for those intervals, so Breeze offers ZERO additional history at
+# these periods. Against that zero benefit: Breeze's session token expired
+# 4 separate times in one working session, and Breeze daily was the
+# confirmed, measured cause of the ITC.NS corruption. No evidence-based
+# reason remains to prefer Breeze at the periods this file actually
+# requests. Revisit only if FETCH_SPEC's periods are widened beyond
+# yfinance's caps (Breeze still can't paginate past ~1000 rows/call even
+# then, so widening would need Breeze pagination work first, not just a
+# SOURCE_PLAN flip).
+SOURCE_PLAN = {
+    ('NSE', '1m'):  {'source': 'yfinance', 'adjustment': 'adjusted'},
+    ('NSE', '5m'):  {'source': 'yfinance', 'adjustment': 'adjusted'},
+    ('NSE', '15m'): {'source': 'yfinance', 'adjustment': 'adjusted'},
+    ('NSE', '30m'): {'source': 'yfinance', 'adjustment': 'adjusted'},
+    ('NSE', '1h'):  {'source': 'yfinance', 'adjustment': 'adjusted'},
+    ('NSE', '1d'):  {'source': 'yfinance', 'adjustment': 'adjusted'},
+
+    ('US', '1m'):  {'source': 'yfinance', 'adjustment': 'adjusted'},
+    ('US', '5m'):  {'source': 'yfinance', 'adjustment': 'adjusted'},
+    ('US', '15m'): {'source': 'yfinance', 'adjustment': 'adjusted'},
+    ('US', '30m'): {'source': 'yfinance', 'adjustment': 'adjusted'},
+    ('US', '1h'):  {'source': 'yfinance', 'adjustment': 'adjusted'},
+    ('US', '1d'):  {'source': 'yfinance', 'adjustment': 'adjusted'},
+
+    ('CRYPTO', '1m'):  {'source': 'binance', 'adjustment': 'raw'},
+    ('CRYPTO', '5m'):  {'source': 'binance', 'adjustment': 'raw'},
+    ('CRYPTO', '15m'): {'source': 'binance', 'adjustment': 'raw'},
+    ('CRYPTO', '30m'): {'source': 'binance', 'adjustment': 'raw'},
+    ('CRYPTO', '1h'):  {'source': 'binance', 'adjustment': 'raw'},
+    ('CRYPTO', '4h'):  {'source': 'binance', 'adjustment': 'raw'},
+    ('CRYPTO', '1d'):  {'source': 'binance', 'adjustment': 'raw'},
+
+    ('COMMODITY', '1m'):  {'source': 'yfinance', 'adjustment': 'raw'},
+    ('COMMODITY', '5m'):  {'source': 'yfinance', 'adjustment': 'raw'},
+    ('COMMODITY', '15m'): {'source': 'yfinance', 'adjustment': 'raw'},
+    ('COMMODITY', '30m'): {'source': 'yfinance', 'adjustment': 'raw'},
+    ('COMMODITY', '1h'):  {'source': 'yfinance', 'adjustment': 'raw'},
+    ('COMMODITY', '1d'):  {'source': 'yfinance', 'adjustment': 'raw'},
+
+    ('FOREX', '1m'):  {'source': 'yfinance', 'adjustment': 'raw'},
+    ('FOREX', '5m'):  {'source': 'yfinance', 'adjustment': 'raw'},
+    ('FOREX', '15m'): {'source': 'yfinance', 'adjustment': 'raw'},
+    ('FOREX', '30m'): {'source': 'yfinance', 'adjustment': 'raw'},
+    ('FOREX', '1h'):  {'source': 'yfinance', 'adjustment': 'raw'},
+    ('FOREX', '1d'):  {'source': 'yfinance', 'adjustment': 'raw'},
+}
+
+
+def get_source_plan(symbol: str, interval: str) -> dict:
+    ac = _asset_class(symbol)
+    plan = SOURCE_PLAN.get((ac, interval))
+    if plan is None:
+        raise ValueError(
+            f'No SOURCE_PLAN entry for asset_class={ac} interval={interval} '
+            f'(symbol={symbol}). Add one explicitly rather than falling back.'
+        )
+    return plan
 
 # ── Fetch specification per symbol ────────────────────────────────────────────
 # IMPORTANT — 4h is NOT in this list for non-crypto symbols.
@@ -351,8 +447,21 @@ def _fetch_breeze(symbol: str, interval: str, period: str) -> pd.DataFrame:
 
     df       = pd.DataFrame(rows).set_index('ts')
     df.index = pd.to_datetime(df.index)
-    if hasattr(df.index, 'tz') and df.index.tz is not None:
-        df.index = df.index.tz_convert(None)
+    # ROOT-CAUSE FIX (data rebuild work order Part 4 Sec 4.1/4.2): Breeze's
+    # 'datetime' field is a naive IST wall-clock string with no tz info, so
+    # the old `if df.index.tz is not None` check never fired and this data
+    # was stored as if it were already UTC -- off by 5:30 from true UTC.
+    # For daily bars this didn't crash anything by itself, but it meant
+    # Breeze's daily bar and yfinance's (correctly UTC-converted) daily bar
+    # for the SAME real trading day ended up keyed under two different DB
+    # dates, which is exactly how ITC.NS got 753 duplicated trading days
+    # alternating between adjusted (yfinance) and raw (Breeze) prices.
+    # Explicitly localize as IST, then convert to true UTC, matching the
+    # convention yfinance and Binance already produce.
+    if df.index.tz is None:
+        df.index = df.index.tz_localize('Asia/Kolkata').tz_convert('UTC').tz_localize(None)
+    else:
+        df.index = df.index.tz_convert('UTC').tz_localize(None)
 
     # FIX-15: Breeze's get_historical_data_v2 caps out around 1000 candles per
     # call with no pagination - it does NOT error when the requested period
@@ -407,64 +516,55 @@ def _resample_to_4h(df_1h: pd.DataFrame) -> pd.DataFrame:
     return resampled
 
 
+def _fetch_yfinance(symbol: str, interval: str, period: str) -> pd.DataFrame:
+    """yfinance does NOT support 4h natively — that's handled by resampling
+    1h in rebuild(), never routed here."""
+    if interval == '4h':
+        return pd.DataFrame()
+    try:
+        ticker = yf.Ticker(symbol)
+        df     = ticker.history(period=period, interval=interval, auto_adjust=True)
+        if df is not None and not df.empty:
+            if hasattr(df.index, 'tz') and df.index.tz is not None:
+                df.index = df.index.tz_convert(None)
+        return df
+    except Exception as e:
+        log.error(f'{symbol} {interval}: yfinance failed: {e}')
+        return pd.DataFrame()
+
+
 # ─────────────────────────────────────────────────────────────────────────────
-# MAIN FETCH ROUTER
+# MAIN FETCH ROUTER — pinned source, no fallback (data rebuild work order R2)
 # ─────────────────────────────────────────────────────────────────────────────
 def fetch_clean_history(symbol: str, interval: str, period: str) -> pd.DataFrame:
     """
-    Fetch from best source with fallback chain.
-    Source priority:
-      Crypto  → Binance public mirror  →  yfinance
-      NSE     → Breeze API             →  yfinance
-      Others  → yfinance
+    Fetch from EXACTLY the source SOURCE_PLAN declares for this symbol's
+    asset class and interval. No fallback chain: a failure here means this
+    series is skipped for this run and must be reported as such by the
+    caller, never silently filled from a different vendor mid-run. That
+    silent substitution — Breeze failing over to yfinance and both landing
+    in the same (symbol, timeframe) series — is what let the same NSE
+    trading day get stored twice under two different price conventions.
 
-    4h interval:
-      Crypto  → Binance native 4h
-      Others  → resampled from 1h (caller must already have 1h data)
-                NOTE: The rebuild() loop handles 4h resampling for non-crypto.
-                      This function only fetches 4h natively for crypto.
-
-    Returns clean OHLCV DataFrame (naive UTC index) with .attrs['source'] set.
+    Returns clean OHLCV DataFrame (naive UTC index) with .attrs['source']
+    and .attrs['price_adjustment'] set, or an empty DataFrame if the
+    pinned source failed or returned nothing.
     """
-    df     = None
-    source = None
+    plan   = get_source_plan(symbol, interval)
+    source = plan['source']
 
-    is_crypto = any(x in symbol for x in ['-USD', 'USDT'])
-
-    # ── Crypto path: Binance public mirror ───────────────────────────────────
-    if is_crypto:
-        df     = _fetch_binance(symbol, interval, period)
-        source = 'binance'
-        if df is None or df.empty:
-            log.warning(f'{symbol}: Binance empty/failed — falling back to yfinance')
-            df     = None
-            source = None
-
-    # ── NSE path: Breeze → yfinance ──────────────────────────────────────────
-    if (df is None or df.empty) and symbol.endswith('.NS'):
-        df     = _fetch_breeze(symbol, interval, period)
-        source = 'breeze'
-        if df is None or df.empty:
-            log.warning(f'{symbol}: Breeze empty/failed — falling back to yfinance')
-            df     = None
-            source = None
-
-    # ── Universal fallback: yfinance ─────────────────────────────────────────
-    # Note: yfinance does NOT support 4h interval — skip it here.
-    # 4h for non-crypto is handled by resampling in rebuild().
-    if (df is None or df.empty) and interval != '4h':
-        try:
-            ticker = yf.Ticker(symbol)
-            df     = ticker.history(period=period, interval=interval, auto_adjust=True)
-            if df is not None and not df.empty:
-                if hasattr(df.index, 'tz') and df.index.tz is not None:
-                    df.index = df.index.tz_convert(None)
-            source = 'yfinance'
-        except Exception as e:
-            log.error(f'{symbol} {interval}: yfinance also failed: {e}')
-            return pd.DataFrame()
+    if source == 'binance':
+        df = _fetch_binance(symbol, interval, period)
+    elif source == 'breeze':
+        df = _fetch_breeze(symbol, interval, period)
+    elif source == 'yfinance':
+        df = _fetch_yfinance(symbol, interval, period)
+    else:
+        raise ValueError(f'Unknown source "{source}" in SOURCE_PLAN for {symbol} {interval}')
 
     if df is None or df.empty:
+        log.warning(f'{symbol} {interval}/{period}: pinned source "{source}" '
+                    f'returned no data — SKIPPING (no fallback per SOURCE_PLAN)')
         return pd.DataFrame()
 
     # ── Clean + validate ──────────────────────────────────────────────────────
@@ -477,9 +577,36 @@ def fetch_clean_history(symbol: str, interval: str, period: str) -> pd.DataFrame
     df = df.dropna(subset=['Open', 'High', 'Low', 'Close'])
     df = df[df['Close'] > 0]
     df = df[df['High'] >= df['Low']]
+    # High>=Low alone does NOT catch a bar whose open/close sit entirely
+    # outside its own high/low range -- confirmed on yfinance INR=X
+    # 2023-11-02, where Open=Close=85.194 against High=83.33/Low=83.17
+    # (a ~2.2% vendor data defect, verified by direct re-fetch, not
+    # something this pipeline introduced).
+    #
+    # Threshold is 1%, not zero-tolerance: a strict zero-tolerance version
+    # of this check was tried first and rejected because GBPJPY=X/
+    # USDJPY=X/INR=X daily bars carry a small (<1%), consistent open/close-
+    # vs-high/low inconsistency on ~5-6% of rows -- most plausibly how
+    # yfinance aggregates a continuously-quoted FX "day" with no single
+    # clean exchange close. Dropping all of those would remove ~100+ bars
+    # per FX series for a sub-1% labeling quirk, a worse trade than
+    # leaving them in and flagging them (verify_rebuild.py's V6 gate
+    # reports the same <1% population as informational). Only the
+    # unambiguous, large violations are dropped here.
+    _n_before = len(df)
+    _excess = pd.concat([
+        (df['Open']  - df['High']).clip(lower=0), (df['Close'] - df['High']).clip(lower=0),
+        (df['Low']   - df['Open']).clip(lower=0), (df['Low']   - df['Close']).clip(lower=0),
+    ], axis=1).max(axis=1)
+    _violation_pct = (_excess / df['High'].replace(0, pd.NA)).fillna(0)
+    df = df[_violation_pct < 0.01]
+    if len(df) < _n_before:
+        log.warning(f'{symbol} {interval}: dropped {_n_before - len(df)} bar(s) with a '
+                    f'>=1% open/close-vs-high/low inconsistency (vendor data defect)')
     df = df[~df.index.duplicated(keep='last')]
     df = df.sort_index()
-    df.attrs['source'] = source   # FIX-11: always a real source tag, never 'unknown'
+    df.attrs['source']           = source
+    df.attrs['price_adjustment'] = plan['adjustment']
 
     log.info(
         f'{symbol} {interval}/{period}: {len(df)} candles from {source} '
@@ -488,172 +615,290 @@ def fetch_clean_history(symbol: str, interval: str, period: str) -> pd.DataFrame
     return df
 
 
+MANIFEST_PATH = os.path.join(os.path.dirname(__file__), 'data_manifest.json')
+
+
+def _compute_content_hash(rows: list) -> str:
+    """
+    Deterministic hash over one series' content (data rebuild work order
+    R6/V11). Re-running the rebuild for an unchanged source should produce
+    an identical hash; a change means the upstream source's data changed
+    under us, which is itself worth knowing, not just "huh, different
+    numbers this time" as happened across the two earlier rebuild attempts.
+
+    Rounds to 4 decimal places before hashing. Measured evidence: two
+    successive yfinance fetches of the same historical daily bar can
+    differ at the ~1e-7 relative level (e.g. 169.26828 vs
+    169.2682647705078) -- float64 jitter from yfinance's own pipeline, not
+    a real price change. Hashing at 6dp made every idempotence check fail
+    on this noise alone, which is a false alarm, not a rebuild defect. 4dp
+    is still far finer than any real tick size for the instruments here.
+    """
+    h = hashlib.sha256()
+    for r in sorted(rows, key=lambda x: x['timestamp']):
+        h.update(
+            f"{r['timestamp'].isoformat()}|{r['Open']:.4f}|{r['High']:.4f}|"
+            f"{r['Low']:.4f}|{r['Close']:.4f}|{r['Volume']}".encode()
+        )
+    return h.hexdigest()
+
+
 # ─────────────────────────────────────────────────────────────────────────────
-# STORE HELPER — bulk store with explicit source, never 'unknown'
+# STORE HELPER — atomic delete-then-write per series (R4), normalized (R1)
 # ─────────────────────────────────────────────────────────────────────────────
 def _store_df(storage: PostgresStorage, df: pd.DataFrame, symbol: str,
-              interval: str, source: str) -> int:
+              interval: str, source: str) -> dict:
     """
-    Store all rows of df into market_data.
-    Returns count of successfully stored rows.
-    Always passes explicit source — never falls back to 'unknown'.
+    Replace the ENTIRE (symbol, interval) series atomically. Every row's
+    timestamp is run through normalize_bar_timestamp first — this is the
+    single point where the ITC.NS-class bug (the same trading day stored
+    twice under two different DB dates, once per source's own convention)
+    is prevented at the source rather than patched after the fact.
+
+    Returns a manifest-ready dict describing what happened. Never partially
+    writes: replace_ohlc_series is one transaction, and if it raises, the
+    existing rows for this series are left untouched (nothing is deleted
+    unless the new data was fully ready to replace it).
     """
     if df is None or df.empty:
-        return 0
+        return {'status': 'SKIPPED', 'reason': 'pinned source returned no data'}
 
-    # Guarantee source is always meaningful
-    if not source or source == 'unknown':
-        log.error(
-            f'_store_df called with source="{source}" for {symbol} {interval}. '
-            'This is a bug — every store must have a named source. Skipping.'
-        )
-        return 0
+    if not source or source in ('unknown', 'unset'):
+        return {'status': 'FAILED', 'reason': f'invalid source "{source}"'}
 
-    stored = 0
-    for i in range(0, len(df), 500):
-        batch = df.iloc[i:i + 500]
-        for ts, row in batch.iterrows():
-            try:
-                storage.store_ohlc(
-                    symbol    = symbol,
-                    timestamp = ts.to_pydatetime() if hasattr(ts, 'to_pydatetime') else ts,
-                    timeframe = interval,
-                    data_dict = {
-                        'Open':   float(row['Open']),
-                        'High':   float(row['High']),
-                        'Low':    float(row['Low']),
-                        'Close':  float(row['Close']),
-                        'Volume': int(row['Volume']),
-                    },
-                    source = source,
-                )
-                stored += 1
-            except Exception as e:
-                log.warning(f'store_ohlc failed {symbol} {ts}: {e}')
+    rows = []
+    for ts, row in df.iterrows():
+        raw_ts  = ts.to_pydatetime() if hasattr(ts, 'to_pydatetime') else ts
+        norm_ts = normalize_bar_timestamp(raw_ts, interval, symbol)
+        rows.append({
+            'timestamp': norm_ts,
+            'Open':   float(row['Open']),
+            'High':   float(row['High']),
+            'Low':    float(row['Low']),
+            'Close':  float(row['Close']),
+            'Volume': int(row['Volume']),
+        })
 
-    return stored
+    # Daily normalization can legitimately collapse two raw rows onto the
+    # same trading date only if the source itself returned a duplicate —
+    # dedupe defensively, keeping the later row (mirrors the upstream
+    # `~df.index.duplicated(keep='last')` convention already applied
+    # in fetch_clean_history).
+    dedup = {}
+    for r in rows:
+        dedup[r['timestamp']] = r
+    rows = list(dedup.values())
+
+    try:
+        written = storage.replace_ohlc_series(symbol, interval, rows, source)
+    except Exception as e:
+        return {'status': 'FAILED', 'reason': f'DB write error: {e}'}
+
+    rows_sorted = sorted(rows, key=lambda r: r['timestamp'])
+    return {
+        'status':           'SUCCESS',
+        'source':           source,
+        'price_adjustment': df.attrs.get('price_adjustment'),
+        'rows_written':     written,
+        'first_bar':        rows_sorted[0]['timestamp'].isoformat(),
+        'last_bar':         rows_sorted[-1]['timestamp'].isoformat(),
+        'content_hash':     _compute_content_hash(rows),
+    }
 
 
 # ─────────────────────────────────────────────────────────────────────────────
 # MAIN REBUILD
 # ─────────────────────────────────────────────────────────────────────────────
-def rebuild(dry_run: bool = False, resume: bool = False):
+def rebuild(dry_run: bool = False, resume: bool = False, only_symbols: list = None,
+           only_intervals: list = None):
+    """
+    Full data rebuild per the data rebuild work order (plan Part 4).
+
+    Design changes from the previous version, and why:
+      - No global wipe-then-refill. Each (symbol, interval) series is only
+        replaced once its replacement data has been fully fetched and
+        validated (R4) — a fetch failure now leaves the existing series
+        untouched rather than deleting first and hoping the refetch
+        succeeds. `--resume` and the default mode are now the same in this
+        respect; `resume`/`dry_run` are kept as CLI flags for compatibility.
+      - Source is PINNED per (asset_class, interval) via SOURCE_PLAN (R2) —
+        no opportunistic Breeze-then-yfinance fallback merged into one
+        series. A pinned-source failure is reported as SKIPPED, not
+        silently substituted.
+      - An advisory lock (R5) prevents this script and the live scan /
+        scheduled task from writing concurrently.
+      - A manifest (R6) is written with per-series source, adjustment,
+        row count, date range and content hash — the missing piece that
+        let two earlier rebuild attempts diverge without anyone noticing.
+    """
     storage = PostgresStorage()
 
-    if not dry_run and not resume:
-        print('\n' + '=' * 60)
-        print('WARNING — This will DELETE ALL market_data rows.')
-        print('  Confirm ALL of these are done before proceeding:')
-        print('  1. migrate_schema.py completed with all ✅')
-        print('  2. backfill_columnar.py completed with 0 NULL rows')
-        print('  3. Unknown 1m rows deleted (DELETE FROM market_data WHERE timeframe=\'1m\' AND data_source=\'unknown\')')
-        print('=' * 60)
-        confirm = input('  Type YES to confirm and start rebuild: ')
-        if confirm.strip() != 'YES':
-            print('Aborted.')
-            return
-        storage.clear_all_market_data()
-        log.info('market_data cleared. Starting full rebuild...')
-    elif resume:
-        log.info('RESUME MODE — existing data kept intact. Fetching to fill gaps...')
-    else:
-        log.info('DRY RUN — no DB writes will happen.')
-
-    # ── Binance connectivity check ────────────────────────────────────────────
-    # FIX-12: Explicit check before starting so we fail fast, not after hours.
     if not dry_run:
-        log.info('Checking Binance public mirror connectivity...')
-        if not _check_binance_reachable():
+        log.info('Acquiring rebuild advisory lock...')
+        if not storage.try_acquire_rebuild_lock():
             log.error(
-                'Cannot reach data-api.binance.vision. '
-                'If you are in India: enable VPN and retry. '
-                'Crypto data will fall back to yfinance (lower quality).'
+                'Could not acquire the rebuild lock — another rebuild (or a '
+                'process holding the same advisory lock) is already running '
+                'against this database. Aborting rather than writing '
+                'concurrently (R5). Try again once the other process exits.'
             )
-            # Don't abort — yfinance fallback will handle it
+            return
+        log.info('Rebuild lock acquired.')
+
+    try:
+        if resume:
+            log.info('RESUME MODE — per-series atomic replace, same as default. '
+                     'Existing rows for a series are only touched once its '
+                     'replacement data is fully fetched and validated.')
+        elif dry_run:
+            log.info('DRY RUN — no DB writes will happen.')
         else:
-            log.info('Binance public mirror: reachable ✅')
+            log.info('Starting rebuild — per-series atomic replace (no global wipe).')
 
-    total_stored = 0
-    total_failed = 0
-
-    # Keep 1h DataFrames in memory so we can resample to 4h without re-fetching
-    # { symbol: df_1h }  — only populated for non-crypto symbols
-    _cached_1h: dict = {}
-
-    for symbol in ALL_SYMBOLS:
-        is_crypto = any(x in symbol for x in ['-USD', 'USDT'])
-        specs = list(FETCH_SPEC)
-        if is_crypto:
-            specs = specs + CRYPTO_EXTRA_SPECS
-
-        for spec in specs:
-            interval = spec['interval']
-            period   = spec['period']
-            label    = spec['label']
-
-            # ── 4h for non-crypto: resample from 1h ──────────────────────────
-            if interval == '4h' and not is_crypto:
-                # Should never reach here — CRYPTO_EXTRA_SPECS is crypto-only.
-                # But guard explicitly.
-                log.warning(f'{symbol}: 4h non-crypto spec found — skipping (resample handles this)')
-                continue
-
-            log.info(f'--- {symbol} | {interval} | {period} [{label}] ---')
-            df = fetch_clean_history(symbol, interval, period)
-
-            if df is None or df.empty:
-                log.warning(f'SKIP: no data for {symbol} {interval}')
-                total_failed += 1
-                continue
-
-            # Cache 1h for later 4h resampling (non-crypto only)
-            if interval == '1h' and not is_crypto:
-                _cached_1h[symbol] = df
-
-            if dry_run:
-                log.info(f'DRY: would store {len(df)} candles — {symbol} {interval} (source={df.attrs.get("source")})')
-                continue
-
-            source  = df.attrs.get('source')
-            stored  = _store_df(storage, df, symbol, interval, source)
-            total_stored += stored
-            log.info(f'Stored {stored}/{len(df)} candles — {symbol} {interval}')
-
-        # ── After all specs for this symbol: build 4h from cached 1h (non-crypto) ─
-        if not is_crypto and not dry_run and symbol in _cached_1h:
-            log.info(f'--- {symbol} | 4h | resampled_from_1h ---')
-            df_1h     = _cached_1h[symbol]
-            df_4h     = _resample_to_4h(df_1h)
-            # 4h resampled source inherits the 1h source tag with suffix
-            src_1h    = df_1h.attrs.get('source', 'yfinance')
-            src_4h    = f'{src_1h}_resampled_4h'
-            if df_4h is not None and not df_4h.empty:
-                if dry_run:
-                    log.info(f'DRY: would store {len(df_4h)} 4h candles for {symbol}')
-                else:
-                    stored = _store_df(storage, df_4h, symbol, '4h', src_4h)
-                    total_stored += stored
-                    log.info(f'Stored {stored}/{len(df_4h)} 4h candles — {symbol} (resampled from {src_1h})')
+        # ── Binance connectivity check ────────────────────────────────────────
+        if not dry_run:
+            log.info('Checking Binance public mirror connectivity...')
+            if not _check_binance_reachable():
+                log.error(
+                    'Cannot reach data-api.binance.vision. Crypto series are '
+                    'pinned to binance only (SOURCE_PLAN) — they will be '
+                    'reported SKIPPED this run, not silently degraded to '
+                    'yfinance. If you are in India: enable VPN and retry.'
+                )
             else:
-                log.warning(f'4h resample produced empty DataFrame for {symbol} — need more 1h data')
-                total_failed += 1
+                log.info('Binance public mirror: reachable.')
 
-    log.info(f'\n{"DRY RUN — " if dry_run else ""}Rebuild complete: '
-             f'{total_stored} candles stored, {total_failed} spec failures')
+        manifest = {
+            'run_started_at': datetime.utcnow().isoformat(),
+            'series': {},   # "{symbol}|{interval}" -> result dict
+        }
+        total_stored  = 0
+        total_skipped = 0
+        total_failed  = 0
 
-    if not dry_run:
-        log.info('Next step: run data_audit.py to verify coverage per symbol/timeframe.')
+        symbols   = only_symbols or ALL_SYMBOLS
+        intervals_filter = set(only_intervals) if only_intervals else None
+
+        # Keep 1h DataFrames in memory so we can resample to 4h without re-fetching
+        _cached_1h: dict = {}
+
+        for symbol in symbols:
+            is_crypto = any(x in symbol for x in ['-USD', 'USDT'])
+            specs = list(FETCH_SPEC)
+            if is_crypto:
+                specs = specs + CRYPTO_EXTRA_SPECS
+            if intervals_filter:
+                specs = [s for s in specs if s['interval'] in intervals_filter]
+
+            for spec in specs:
+                interval = spec['interval']
+                period   = spec['period']
+                label    = spec['label']
+                key      = f'{symbol}|{interval}'
+
+                if interval == '4h' and not is_crypto:
+                    continue  # handled by resampling below
+
+                log.info(f'--- {symbol} | {interval} | {period} [{label}] ---')
+                df = fetch_clean_history(symbol, interval, period)
+
+                if df is None or df.empty:
+                    log.warning(f'SKIP: no data for {symbol} {interval}')
+                    manifest['series'][key] = {
+                        'status': 'SKIPPED',
+                        'reason': 'pinned source unavailable or returned no data',
+                    }
+                    total_skipped += 1
+                    continue
+
+                if interval == '1h' and not is_crypto:
+                    _cached_1h[symbol] = df
+
+                if dry_run:
+                    log.info(f'DRY: would replace {len(df)} candles — {symbol} {interval} '
+                            f'(source={df.attrs.get("source")})')
+                    continue
+
+                source = df.attrs.get('source')
+                result = _store_df(storage, df, symbol, interval, source)
+                manifest['series'][key] = result
+                if result['status'] == 'SUCCESS':
+                    total_stored += result['rows_written']
+                    log.info(f"Replaced {result['rows_written']} candles — {symbol} {interval} "
+                             f"[{result['first_bar']} -> {result['last_bar']}]")
+                elif result['status'] == 'SKIPPED':
+                    total_skipped += 1
+                else:
+                    total_failed += 1
+                    log.error(f"FAILED {symbol} {interval}: {result['reason']}")
+
+            # ── 4h from cached 1h (non-crypto) ────────────────────────────────
+            if not is_crypto and not dry_run and symbol in _cached_1h:
+                key = f'{symbol}|4h'
+                log.info(f'--- {symbol} | 4h | resampled_from_1h ---')
+                df_1h  = _cached_1h[symbol]
+                df_4h  = _resample_to_4h(df_1h)
+                src_1h = df_1h.attrs.get('source', 'yfinance')
+                src_4h = f'{src_1h}_resampled_4h'
+                if df_4h is not None and not df_4h.empty:
+                    df_4h.attrs['price_adjustment'] = df_1h.attrs.get('price_adjustment')
+                    result = _store_df(storage, df_4h, symbol, '4h', src_4h)
+                    manifest['series'][key] = result
+                    if result['status'] == 'SUCCESS':
+                        total_stored += result['rows_written']
+                        log.info(f"Replaced {result['rows_written']} 4h candles — {symbol} "
+                                f"(resampled from {src_1h})")
+                    else:
+                        total_failed += 1
+                else:
+                    log.warning(f'4h resample produced empty DataFrame for {symbol} — need more 1h data')
+                    manifest['series'][key] = {'status': 'SKIPPED', 'reason': 'insufficient 1h data to resample'}
+                    total_skipped += 1
+
+        manifest['run_finished_at'] = datetime.utcnow().isoformat()
+        manifest['totals'] = {
+            'stored': total_stored, 'skipped': total_skipped, 'failed': total_failed,
+        }
+
+        if not dry_run:
+            with open(MANIFEST_PATH, 'w') as f:
+                json.dump(manifest, f, indent=2, default=str)
+            log.info(f'Manifest written: {MANIFEST_PATH}')
+
+        log.info(f'\n{"DRY RUN — " if dry_run else ""}Rebuild complete: '
+                 f'{total_stored} candles stored, {total_skipped} series skipped, '
+                 f'{total_failed} series failed')
+
+        skipped_keys = [k for k, v in manifest['series'].items() if v['status'] == 'SKIPPED']
+        failed_keys  = [k for k, v in manifest['series'].items() if v['status'] == 'FAILED']
+        if skipped_keys:
+            log.warning(f'SKIPPED ({len(skipped_keys)}): {skipped_keys}')
+        if failed_keys:
+            log.error(f'FAILED ({len(failed_keys)}): {failed_keys}')
+
+        if not dry_run:
+            log.info('Next step: run scripts/verify_rebuild.py to check the 11 verification gates.')
+    finally:
+        if not dry_run:
+            storage.release_rebuild_lock()
+            log.info('Rebuild lock released.')
 
 
 if __name__ == '__main__':
-    parser = argparse.ArgumentParser(description='Rebuild market_data from verified sources')
+    parser = argparse.ArgumentParser(description='Rebuild market_data from verified, pinned sources')
     parser.add_argument('--dry-run', action='store_true',
                         help='Show what would be fetched without touching DB')
     parser.add_argument('--resume', action='store_true',
-                        help='Skip wiping the DB and just fetch/upsert to fill gaps')
+                        help='(Compatibility flag — behavior is now the same as default: '
+                             'per-series atomic replace, nothing wiped up front.)')
+    parser.add_argument('--symbols', nargs='+', default=None,
+                        help='Limit to these symbols (default: all)')
+    parser.add_argument('--intervals', nargs='+', default=None,
+                        help='Limit to these intervals (default: all in FETCH_SPEC)')
     args = parser.parse_args()
     logging.basicConfig(
         level=logging.INFO,
         format='%(asctime)s %(levelname)s %(name)s: %(message)s',
     )
-    rebuild(dry_run=args.dry_run, resume=args.resume)
+    rebuild(dry_run=args.dry_run, resume=args.resume,
+           only_symbols=args.symbols, only_intervals=args.intervals)

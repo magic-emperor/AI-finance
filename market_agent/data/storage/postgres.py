@@ -5,13 +5,14 @@ from typing import Optional
 from sqlalchemy import (
     create_engine, Column, String, Integer,
     Float as SAFloat, Float, LargeBinary, DateTime, Index, text,
-    Numeric, BigInteger, Boolean
+    Numeric, BigInteger, Boolean, UniqueConstraint
 )
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 import json as _json
 from pgvector.sqlalchemy import Vector
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 
 
 
@@ -36,6 +37,67 @@ def _get_st_model():
             _ST_MODEL = None
     return _ST_MODEL
 # ─────────────────────────────────────────────────────────────────────────────
+
+def _is_nse_symbol(symbol: str) -> bool:
+    return symbol.endswith('.NS') or symbol.startswith('^NSE')
+
+
+def normalize_bar_timestamp(ts, timeframe: str, symbol: str):
+    """
+    Single source of truth for bar timestamps (data rebuild work order,
+    Part 4 Sec 4.2 R1). Every writer of market_data must route through
+    this before storing.
+
+    PRECONDITION: `ts` must already be a genuine UTC instant (tz-aware in
+    any zone, or naive-and-already-UTC) by the time it reaches this
+    function. Fetch code is responsible for converting its source's raw
+    wall-clock time to true UTC first (this is why _fetch_breeze was
+    changed to tz_localize('Asia/Kolkata').tz_convert('UTC') instead of
+    leaving Breeze's naive IST string unconverted).
+
+    Root cause this fixes: ITC.NS 1d held 3,475 rows for only 2,722
+    distinct trading days (753 duplicated). yfinance's daily bar for NSE
+    is nominally IST midnight of the trading date; once genuinely
+    converted to UTC that instant is 18:30 UTC on the PREVIOUS calendar
+    day. Reading .date() off that raw UTC instant therefore lands one
+    calendar day early for every single NSE daily bar. Breeze's daily
+    bars, by contrast, were being stored as a naive string with no
+    conversion applied at all, so they kept the correct trading date by
+    accident. The two conventions collided under the same
+    (symbol, timeframe) key, alternating between yfinance's adjusted
+    price and Breeze's raw price for what was actually the same trading
+    day -- the repeating ~24% sawtooth found in ITC.NS.
+
+    For '1d'/'1w': returns UTC midnight of the TRADING date. For NSE
+    symbols this requires converting the UTC instant back to IST before
+    reading the date (adding 5:30) -- see the root-cause note above.
+    Non-NSE dailies (US midnight -> UTC same calendar day; crypto/FX/
+    commodities already UTC-native) need no adjustment.
+
+    For intraday timeframes: returns the instant unchanged (tz stripped).
+    An exact instant has no "which calendar day" ambiguity once it is
+    truly UTC, so no per-symbol correction applies.
+
+    Idempotent: normalize_bar_timestamp(normalize_bar_timestamp(x, tf, s), tf, s)
+    returns the same value as one call.
+    """
+    if isinstance(ts, str):
+        import pandas as _pd
+        ts = _pd.Timestamp(ts)
+    if getattr(ts, 'tzinfo', None) is not None:
+        ts = ts.astimezone(timezone.utc).replace(tzinfo=None)
+    if hasattr(ts, 'to_pydatetime'):
+        ts = ts.to_pydatetime()
+
+    if timeframe not in ('1d', '1w'):
+        return ts
+
+    if _is_nse_symbol(symbol):
+        trading_date = (ts + timedelta(hours=5, minutes=30)).date()
+    else:
+        trading_date = ts.date()
+    return datetime(trading_date.year, trading_date.month, trading_date.day)
+
 
 Base = declarative_base()
 
@@ -62,6 +124,14 @@ class MarketData(Base):
     close_price = Column(Numeric(18, 6), nullable=True)
     volume_val  = Column(BigInteger, nullable=True)
     data_source = Column(String(20), default='legacy')
+
+    # One bar per (symbol, timestamp, timeframe). Without this, concurrent
+    # writers can both miss the existence check and both insert, and the
+    # resulting duplicates are then invisible to a .first() lookup forever.
+    __table_args__ = (
+        UniqueConstraint('symbol', 'timestamp', 'timeframe',
+                         name='uq_market_data_symbol_ts_tf'),
+    )
 
 class Predictions(Base):
     """
@@ -464,15 +534,9 @@ class PostgresStorage:
                 caller=caller[:200],
             )
             source = 'unset'
+        timestamp = normalize_bar_timestamp(timestamp, timeframe, symbol)
         session = self.Session()
         try:
-            # Check for existing row (upsert semantics)
-            existing = session.query(MarketData).filter(
-                MarketData.symbol    == symbol,
-                MarketData.timestamp == timestamp,
-                MarketData.timeframe == timeframe,
-            ).first()
-
             fields = dict(
                 data_binary  = pickle.dumps(data_dict),       # LEGACY — keep during transition
                 open_price   = float(data_dict.get('Open',  0) or 0),
@@ -483,20 +547,112 @@ class PostgresStorage:
                 data_source  = source,
             )
 
-            if existing:
-                for k, v in fields.items():
-                    setattr(existing, k, v)
-            else:
-                entry = MarketData(
-                    symbol=symbol, timestamp=timestamp, timeframe=timeframe,
-                    **fields
-                )
-                session.add(entry)
-
+            # Atomic upsert. The previous check-then-insert left a window in
+            # which two writers could both miss the existence check and both
+            # insert; the resulting duplicate rows were then permanently
+            # invisible to the .first() lookup that was supposed to find them.
+            stmt = pg_insert(MarketData).values(
+                symbol=symbol, timestamp=timestamp, timeframe=timeframe, **fields
+            ).on_conflict_do_update(
+                constraint='uq_market_data_symbol_ts_tf',
+                set_=fields,
+            )
+            session.execute(stmt)
             session.commit()
         except Exception as e:
             session.rollback()
             logger.error('store_ohlc_failed', symbol=symbol, error=str(e))
+            raise
+        finally:
+            session.close()
+
+    # Fixed advisory-lock key for the data rebuild script (R5). Any int64;
+    # chosen arbitrarily but must stay constant across runs since it's the
+    # rendezvous point two concurrent rebuild processes would collide on.
+    REBUILD_LOCK_KEY = 875_301_442
+
+    def try_acquire_rebuild_lock(self) -> bool:
+        """
+        Session-level PostgreSQL advisory lock so the live scan/scheduled
+        task and a data rebuild never write to market_data concurrently
+        (R5). Non-blocking: returns False immediately if another rebuild
+        already holds it, rather than queuing. Caller must hold the
+        returned connection open for the rebuild's duration and call
+        release_rebuild_lock() with it in a finally block.
+        """
+        conn = self.engine.connect()
+        got = conn.execute(
+            text('SELECT pg_try_advisory_lock(:key)'),
+            {'key': self.REBUILD_LOCK_KEY}
+        ).scalar()
+        if not got:
+            conn.close()
+            return False
+        self._rebuild_lock_conn = conn
+        return True
+
+    def release_rebuild_lock(self):
+        conn = getattr(self, '_rebuild_lock_conn', None)
+        if conn is not None:
+            try:
+                conn.execute(text('SELECT pg_advisory_unlock(:key)'),
+                             {'key': self.REBUILD_LOCK_KEY})
+            finally:
+                conn.close()
+                self._rebuild_lock_conn = None
+
+    def replace_ohlc_series(self, symbol: str, timeframe: str, rows: list, source: str):
+        """
+        Atomic delete-then-write for one (symbol, timeframe) series (data
+        rebuild work order Part 4 R4). Unlike store_ohlc's per-bar upsert,
+        this replaces the WHOLE series in one transaction: delete every
+        existing row for (symbol, timeframe), then insert every row in
+        `rows`. Either all of it lands or none of it does — a rebuild that
+        fails partway through must never leave a half-replaced series
+        (that half-and-half state is exactly what produced the ITC.NS
+        corruption, just from concurrent runs instead of a mid-write crash).
+
+        `rows`: list of dicts with keys Open/High/Low/Close/Volume and a
+        'timestamp' key already normalized via normalize_bar_timestamp
+        (the caller is expected to have done this — it is not repeated
+        here since bulk callers already run every row through the same
+        fetch pipeline that calls it).
+
+        Returns the number of rows written. Raises and writes nothing on
+        any failure (session.rollback() on exception).
+        """
+        session = self.Session()
+        try:
+            session.query(MarketData).filter(
+                MarketData.symbol == symbol,
+                MarketData.timeframe == timeframe,
+            ).delete(synchronize_session=False)
+
+            objects = []
+            for row in rows:
+                objects.append(MarketData(
+                    symbol      = symbol,
+                    timestamp   = row['timestamp'],
+                    timeframe   = timeframe,
+                    data_binary = pickle.dumps({
+                        'Open': row['Open'], 'High': row['High'],
+                        'Low': row['Low'], 'Close': row['Close'],
+                        'Volume': row['Volume'],
+                    }),
+                    open_price  = float(row['Open']),
+                    high_price  = float(row['High']),
+                    low_price   = float(row['Low']),
+                    close_price = float(row['Close']),
+                    volume_val  = int(row['Volume']),
+                    data_source = source,
+                ))
+            session.bulk_save_objects(objects)
+            session.commit()
+            return len(objects)
+        except Exception as e:
+            session.rollback()
+            logger.error('replace_ohlc_series_failed', symbol=symbol,
+                         timeframe=timeframe, error=str(e))
             raise
         finally:
             session.close()

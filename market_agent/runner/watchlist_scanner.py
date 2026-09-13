@@ -236,18 +236,23 @@ def _fetch_hybrid_data(symbol: str, storage: PostgresStorage) -> Optional[Any]:
         logger.info("gap_fill_triggered", symbol=symbol, gap_min=diff_minutes)
         try:
             gap_df = None
+            gap_source = None
             # Fetch from Binance if Crypto/Forex
             if any(s in symbol for s in ("-USD", "=X", "=F")):
                 try:
                     from market_agent.data.ingestion.realtime_feed import price_feed
                     gap_df = price_feed.fetch_binance_history(symbol, limit=1000)
-                except Exception:
-                    pass
-            
+                    if gap_df is not None and not gap_df.empty:
+                        gap_source = 'binance'
+                except Exception as _binance_err:
+                    logger.warning("gap_fill_binance_failed", symbol=symbol,
+                                   error=str(_binance_err)[:120])
+
             # Fallback (or Primary for NSE) to yfinance
             if gap_df is None or gap_df.empty:
                 ticker = yf.Ticker(symbol)
                 gap_df = ticker.history(period="5d", interval="1m")
+                gap_source = 'yfinance'
             
             if gap_df is not None and not gap_df.empty:
                 # Normalize columns and index (Strip TZ)
@@ -260,25 +265,40 @@ def _fetch_hybrid_data(symbol: str, storage: PostgresStorage) -> Optional[Any]:
                     gap_df = gap_df[gap_df.index > last_ts]
                 
                 if not gap_df.empty:
-                    # Determine source tag for these gap-fill rows.
-                    # Previously no source was passed → defaulted to 'unknown' →
-                    # this was the confirmed cause of the 39,002 mystery 1m rows.
-                    gap_source = (
-                        'binance' if any(s in symbol for s in ("-USD", "=X", "=F"))
-                        else 'yfinance'
-                    )
-                    # Store new data to DB
-                    for ts, row in gap_df.iterrows():
-                        data_dict = {
-                            "Open": float(row["Open"]),
-                            "High": float(row["High"]),
-                            "Low": float(row["Low"]),
-                            "Close": float(row["Close"]),
-                            "Volume": int(row["Volume"])
-                        }
-                        storage.store_ohlc(symbol, ts.to_pydatetime(), "1m", data_dict,
-                                           source=gap_source)
-                    
+                    # gap_source is set by whichever fetch actually returned rows.
+                    # It was previously derived from the symbol pattern, which
+                    # tagged every =F/=X row 'binance' even when the Binance call
+                    # had failed and yfinance served the data — 55,341 rows of
+                    # gold, crude and FX ended up claiming a Binance origin for
+                    # instruments Binance does not list.
+                    #
+                    # Non-blocking advisory lock check (data rebuild work order
+                    # R5): a full data_rebuild.py run does a per-series DELETE+
+                    # INSERT. If this gap-fill wrote concurrently, its rows for
+                    # this exact (symbol, timeframe) could be deleted by the
+                    # rebuild before its own fresh insert lands. The unique
+                    # constraint means this can never produce duplicate/corrupt
+                    # rows — at worst a few freshly gap-filled bars are silently
+                    # discarded — but skipping this cycle's write when a rebuild
+                    # is running removes that race entirely rather than relying
+                    # on it being rare.
+                    if storage.try_acquire_rebuild_lock():
+                        try:
+                            for ts, row in gap_df.iterrows():
+                                data_dict = {
+                                    "Open": float(row["Open"]),
+                                    "High": float(row["High"]),
+                                    "Low": float(row["Low"]),
+                                    "Close": float(row["Close"]),
+                                    "Volume": int(row["Volume"])
+                                }
+                                storage.store_ohlc(symbol, ts.to_pydatetime(), "1m", data_dict,
+                                                   source=gap_source)
+                        finally:
+                            storage.release_rebuild_lock()
+                    else:
+                        logger.warning("gap_fill_skipped_rebuild_in_progress", symbol=symbol)
+
                     # Merge
                     hist = pd.concat([hist, gap_df])
                     
