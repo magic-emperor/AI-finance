@@ -46,6 +46,39 @@ logging.basicConfig(level=logging.WARNING, format="%(levelname)s %(name)s: %(mes
 UNIVERSE = config.WATCHLISTS["fx"] + config.WATCHLISTS["commodity"]
 STATE_PATH = os.path.join(config.OUTPUT_DIR, "paper_state_fx_commodity.json")
 EQUITY_PATH = os.path.join(config.OUTPUT_DIR, "paper_equity_fx_commodity.csv")
+KILL_FLAG_PATH = os.path.join(config.OUTPUT_DIR, "paper_fx_commodity_KILLED.json")
+
+# Pre-committed kill criteria (set 2026-09-15, BEFORE knowing how this plays out --
+# same discipline as every other threshold this session). Two independent triggers:
+#   HARD STOP  : peak-to-trough drawdown on the paper equity curve breaches -20%.
+#                (A dollar-drawdown proxy for the backtest gate's -15R ceiling --
+#                not an exact unit conversion, since R-multiples and a compounding
+#                $ equity curve with concurrent positions don't map 1:1. Chosen to
+#                be a comparably strict ceiling in the same spirit.)
+#   TIME STOP  : after 180 days (~6 months) forward, if fewer than 15 forward trades
+#                have closed OR mean forward R is <= 0, the trial is INCONCLUSIVE-
+#                LEANING-NEGATIVE and stops -- "not enough data yet" does not get to
+#                extend indefinitely once 6 months have passed.
+# Either trigger writes KILL_FLAG_PATH once and stays flagged (this script does not
+# un-flag itself -- clearing it is a deliberate human decision).
+HARD_STOP_DRAWDOWN_PCT = -20.0
+TIME_STOP_DAYS = 180
+TIME_STOP_MIN_TRADES = 15
+
+
+def check_kill_criteria(days: int, port, forward_trades) -> str | None:
+    if port.max_drawdown_pct <= HARD_STOP_DRAWDOWN_PCT:
+        return (f"HARD STOP: paper drawdown {port.max_drawdown_pct:.1f}% breached "
+                f"{HARD_STOP_DRAWDOWN_PCT:.0f}% ceiling.")
+    if days >= TIME_STOP_DAYS:
+        closed = [t for t in forward_trades if t.exit_time is not None]
+        mean_r = (sum(t.R for t in closed) / len(closed)) if closed else None
+        if len(closed) < TIME_STOP_MIN_TRADES or (mean_r is not None and mean_r <= 0):
+            return (f"TIME STOP: {days} days elapsed, {len(closed)} forward trades "
+                    f"closed (need >={TIME_STOP_MIN_TRADES}), mean forward R="
+                    f"{mean_r if mean_r is not None else 'n/a'} -- inconclusive-"
+                    f"leaning-negative, not extending further.")
+    return None
 
 
 def _load_start(today: str, persist: bool) -> str:
@@ -101,12 +134,28 @@ def main():
     P = config.PORTFOLIO
     port = simulate_portfolio(forward_trades, P["starting_capital"], P["risk_pct"],
                               P["max_concurrent"], P["fractional"], P["min_position_cash"])
+    days = (date.fromisoformat(today) - start_date).days
+
+    if os.path.exists(KILL_FLAG_PATH):
+        with open(KILL_FLAG_PATH) as f:
+            prior = json.load(f)
+        print("\n" + "!" * 70)
+        print(f"  ALREADY KILLED on {prior['killed_on']}: {prior['reason']}")
+        print("  (clearing this flag is a deliberate human decision, not automatic)")
+        print("!" * 70)
+    else:
+        kill_reason = check_kill_criteria(days, port, forward_trades)
+        if kill_reason:
+            with open(KILL_FLAG_PATH, "w") as f:
+                json.dump({"killed_on": today, "reason": kill_reason}, f, indent=2)
+            print("\n" + "!" * 70)
+            print(f"  KILL CRITERION TRIGGERED: {kill_reason}")
+            print("!" * 70)
 
     print("\n" + "=" * 70)
     print(f"  PAPER MONITOR (FX/commodity) — long-only Donchian, baseline 2.5R   {today} UTC")
     print(f"  paper start: {paper_start}   universe: {', '.join(UNIVERSE)}   start ${P['starting_capital']:.0f}")
     print("=" * 70)
-    days = (date.fromisoformat(today) - start_date).days
     print(f"\n  FORWARD PAPER EQUITY: ${port.final_capital:.2f}  ({port.return_pct:+.1f}%)  "
           f"over {days} day(s), {port.taken} trade(s) taken")
     if days == 0:
