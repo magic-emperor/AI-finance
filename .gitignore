@@ -63,8 +63,12 @@ paper_trade_ledger.json
 # ══════════════════════════════════════════════
 # Test / diagnostic / scratch scripts (root-level)
 # ══════════════════════════════════════════════
-test_*.py
-check_*.py
+# Anchored to repo root ONLY (leading /) -- unanchored versions of these two
+# patterns silently matched engine/tests/test_*.py and tests/test_brain_*.py
+# too, which are real pytest suites, not scratch. Found 2026-09-15 while
+# trying to commit engine/tests/test_cross_sectional_honesty.py.
+/test_*.py
+/check_*.py
 audit_db_data.py
 analyze_amv_temp.py
 diag_sweep_v4.py
