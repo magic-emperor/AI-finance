@@ -59,6 +59,11 @@ task.md
 *.csv
 faiss_index/
 paper_trade_ledger.json
+# Exception: this IS the forward paper-trading record -- the whole point of
+# committing it daily from CI is that it persists. Found 2026-09-15: the
+# blanket *.csv rule above was silently blocking every commit of it, so the
+# Action ran green but the equity log was never actually saved anywhere.
+!engine/output/paper_equity_fx_commodity.csv
 
 # ══════════════════════════════════════════════
 # Test / diagnostic / scratch scripts (root-level)
