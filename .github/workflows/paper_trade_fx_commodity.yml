@@ -1,0 +1,55 @@
+name: Paper trade — FX/commodity Donchian
+
+# Daily forward-paper-trading snapshot for the FX/commodity Donchian trial
+# (registry.py hypothesis id=2, trial id=4). Runs once/day because the
+# strategy only acts on DAILY bar closes -- there is nothing to gain from
+# running more often, and doing so would reintroduce the timeframe-mismatch
+# mistake documented in the plan history (Part 1.1).
+#
+# Persistence trick: Render's free tier has no persistent disk (state gets
+# wiped on every restart/redeploy) and free Postgres expires after 30 days --
+# neither survives a months-long paper-trading run. Git itself is the
+# persistence layer here: this job commits the updated state/equity files
+# back to this branch every run, genuinely free, no server to keep alive.
+
+on:
+  schedule:
+    # 23:30 UTC daily -- after the daily candle closes for every symbol in
+    # the universe (US/EU/Asia markets all closed for the day by then).
+    - cron: "30 23 * * *"
+  workflow_dispatch: {}   # allow manual runs from the Actions tab
+
+permissions:
+  contents: write
+
+jobs:
+  paper-trade:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feat/liquidity-core-v2
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install minimal dependencies
+        run: pip install -r engine/requirements.txt
+
+      - name: Run paper-trading snapshot
+        run: python -X utf8 -m engine.run_paper_fx_commodity
+
+      - name: Commit and push updated state
+        run: |
+          git config user.name "paper-trade-bot"
+          git config user.email "actions@users.noreply.github.com"
+          git add engine/output/paper_state_fx_commodity.json \
+                  engine/output/paper_equity_fx_commodity.csv \
+                  engine/output/paper_fx_commodity_KILLED.json 2>/dev/null || true
+          if ! git diff --cached --quiet; then
+            git commit -m "chore: daily paper-trading snapshot ($(date -u +%Y-%m-%d))"
+            git push origin feat/liquidity-core-v2
+          else
+            echo "No state changes to commit."
+          fi
