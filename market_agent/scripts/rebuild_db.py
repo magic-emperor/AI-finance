@@ -78,6 +78,29 @@ NSE_STOCKS = [
     'ITC.NS', 'HDFCBANK.NS', 'RELIANCE.NS', 'TATASTEEL.NS',
     'LT.NS', 'M&M.NS', 'ADANIENT.NS', 'ADANIPORTS.NS',
 ]
+# 2026-09-15: the India momentum literature (see registry.py hypothesis
+# india-cross-sectional-momentum) finds the alpha concentrated in LOW-TURNOVER
+# names, and the 8 symbols above are all liquid Nifty50 large-caps -- exactly
+# the segment the research says is weakest. Added 50 Nifty Midcap 150
+# constituents (sourced from niftyindices.com's official list via
+# tickertape.in, cross-checked; two tickers corrected from the scraped source
+# -- SRF, UPL) as candidates for the actual illiquid-tilt universe. This list
+# is a broad NET, not a pre-filtered "illiquid" list -- real turnover is
+# measured from the fetched data itself once backfilled, not assumed from
+# index membership (per the "measure, don't assume" checklist).
+NSE_MIDCAP_CANDIDATES = [
+    'APARINDS.NS', 'ASTRAL.NS', 'BANKINDIA.NS', 'BHEL.NS', 'COCHINSHIP.NS',
+    'COROMANDEL.NS', 'DIXON.NS', 'FEDERALBNK.NS', 'GICRE.NS', 'GODFRYPHLP.NS',
+    'HEROMOTOCO.NS', 'HUDCO.NS', 'IDFCFIRSTB.NS', 'INDUSTOWER.NS', 'JSL.NS',
+    'KPITTECH.NS', 'LICHSGFIN.NS', 'M&MFIN.NS', 'MFSL.NS', 'MRF.NS',
+    'NHPC.NS', 'OBEROIRLTY.NS', 'PERSISTENT.NS', 'POLYCAB.NS', 'PATANJALI.NS',
+    'RVNL.NS', 'SAIL.NS', 'SBICARD.NS', 'SCHAEFFLER.NS', 'SJVN.NS',
+    'SRF.NS', 'SUNDARMFIN.NS', 'SUPREMEIND.NS', 'SUZLON.NS', 'TATACOMM.NS',
+    'TATAELXSI.NS', 'TATAINVEST.NS', 'THERMAX.NS', 'TIINDIA.NS', 'TORNTPOWER.NS',
+    'UBL.NS', 'UPL.NS', 'VOLTAS.NS', 'YESBANK.NS', 'AIIL.NS',
+    'LLOYDSME.NS', 'KALYANKJIL.NS', 'PAYTM.NS', 'LICI.NS', 'SWIGGY.NS',
+]
+NSE_STOCKS = NSE_STOCKS + NSE_MIDCAP_CANDIDATES
 INDICES     = ['^NSEBANK', '^NSEI']          # FIX-10: added ^NSEI for regime detection
 US_STOCKS   = ['NVDA', 'GOOGL', 'AAPL', 'AMD']
 CRYPTO      = ['BTC-USD', 'ETH-USD']         # FIX-9: added ETH-USD
