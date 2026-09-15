@@ -64,6 +64,7 @@ paper_trade_ledger.json
 # blanket *.csv rule above was silently blocking every commit of it, so the
 # Action ran green but the equity log was never actually saved anywhere.
 !engine/output/paper_equity_fx_commodity.csv
+!engine/output/paper_equity_us_crypto_etf.csv
 
 # ══════════════════════════════════════════════
 # Test / diagnostic / scratch scripts (root-level)
