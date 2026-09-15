@@ -134,6 +134,26 @@ MEANREV = {
     "lookback_bars": 260,
 }
 
+# ── Gold long-horizon mean-reversion (FROZEN before OOS run, 2026-09-15) ──────
+# Literature grounding: gold shows 8-14 month price cycles around a slow mean,
+# not persistent trend (see engine/strategy/gold_meanrev.py docstring). Distinct
+# hypothesis/family from MEANREV (Connors RSI-2, days-scale, uptrend-gated) and
+# from DONCHIAN (trend-following) -- registered as its own family in registry.py
+# before this was tuned or run.
+GOLD_MEANREV = {
+    "interval":         "1d",
+    "lookback_bars":    320,    # must cover sma_cycle + zscore_lookback
+    "sma_cycle":        250,    # ~1 trading year -- inside the 8-14mo (~168-294d) window
+    "zscore_lookback":  60,     # rolling std window for the deviation z-score
+    "entry_z":          1.5,    # enter when price is >=1.5 std devs from the cycle mean
+    "atr_period":       14,
+    "adx_period":       14,
+    "adx_max":          25.0,   # don't fade a genuine strong trend
+    "stop_atr_mult":    2.5,    # gold needs room; this is the tail-risk cap
+    "max_hold_bars":    120,    # ~6 months -- inside the cycle, not open-ended
+    "long_only":        False,  # gold overshoots both directions per the literature
+}
+
 # ── Phase 2 paper trading ─────────────────────────────────────────────────────
 # Focused, diversified-by-design LONG-ONLY basket (shorts were tested and rejected).
 # Different drivers: broad market, tech, crypto, gold, small-caps.
