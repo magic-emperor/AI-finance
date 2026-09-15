@@ -44,9 +44,15 @@ jobs:
         run: |
           git config user.name "paper-trade-bot"
           git config user.email "actions@users.noreply.github.com"
-          git add engine/output/paper_state_fx_commodity.json \
-                  engine/output/paper_equity_fx_commodity.csv \
-                  engine/output/paper_fx_commodity_KILLED.json 2>/dev/null || true
+          # Separate `git add` calls, each swallowed independently -- a SINGLE
+          # `git add a b c` call fails (exit 128) and stages NOTHING at all
+          # if any one path doesn't exist (confirmed 2026-09-15: this is why
+          # two prior runs went green but committed nothing). The KILL flag
+          # file only exists once a kill criterion actually fires, so it
+          # must not be able to block the other two from being staged.
+          git add engine/output/paper_state_fx_commodity.json 2>/dev/null || true
+          git add engine/output/paper_equity_fx_commodity.csv 2>/dev/null || true
+          git add engine/output/paper_fx_commodity_KILLED.json 2>/dev/null || true
           if ! git diff --cached --quiet; then
             git commit -m "chore: daily paper-trading snapshot ($(date -u +%Y-%m-%d))"
             git push origin feat/liquidity-core-v2
