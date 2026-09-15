@@ -1,0 +1,201 @@
+"""
+run_paper_fx_commodity.py — forward paper-trading monitor for the FX/commodity
+Donchian trial (registry.py hypothesis id=2, trial id=4).
+
+Deliberately a SEPARATE track from the old US/crypto/etf paper monitor
+(run_paper.py, archived 2026-09-15 in engine/output/archive/ -- it had
+accumulated zero trades in its only run). Uses the EXACT configuration that
+was actually registered and gate-tested for this universe: plain baseline
+Donchian (simulate() v1, config.DONCHIAN unmodified, long_only=True) -- NOT
+the partial-trail/pyramid exit variant the old US/crypto/etf track used,
+which was never tested on this universe. Mixing them would silently paper-
+trade a strategy different from the one that passed the gate.
+
+Robustness context as of 2026-09-15 (see registry.py trial for hypothesis
+id=2): survives 2x-cost stress (exp_R +0.242 -> +0.222) and +3-bar latency
+stress (+0.242 -> +0.198) cleanly. Deflated Sharpe against the full 3-trial
+trend-following family (us_crypto_etf, nse, fx_commodity) is 0.524 --
+barely above the 0.5 "indistinguishable from luck" line, well short of the
+~0.95 usual confidence bar. This paper track exists BECAUSE of that
+ambiguity, not despite it: forward data is the one kind of evidence that
+can't be contaminated by the multiple-comparisons problem the DSR is
+flagging, since it doesn't exist yet. This is not a claim the edge is
+real -- it is the cheapest way to find out.
+
+Run once a day (or whenever forex is open -- most FX pairs trade ~24/5):
+    python -X utf8 -m engine.run_paper_fx_commodity            # daily snapshot
+    python -X utf8 -m engine.run_paper_fx_commodity --no-log   # look only
+"""
+from __future__ import annotations
+
+import os
+import csv
+import json
+import argparse
+import logging
+from datetime import datetime, timezone, date
+
+from engine import config
+from engine.data.feed import CryptoUSFeed
+from engine.strategy.donchian import DonchianStrategy
+from engine.backtest.simulator import simulate
+from engine.backtest.portfolio import simulate_portfolio
+
+logging.basicConfig(level=logging.WARNING, format="%(levelname)s %(name)s: %(message)s")
+
+UNIVERSE = config.WATCHLISTS["fx"] + config.WATCHLISTS["commodity"]
+STATE_PATH = os.path.join(config.OUTPUT_DIR, "paper_state_fx_commodity.json")
+EQUITY_PATH = os.path.join(config.OUTPUT_DIR, "paper_equity_fx_commodity.csv")
+KILL_FLAG_PATH = os.path.join(config.OUTPUT_DIR, "paper_fx_commodity_KILLED.json")
+
+# Pre-committed kill criteria (set 2026-09-15, BEFORE knowing how this plays out --
+# same discipline as every other threshold this session). Two independent triggers:
+#   HARD STOP  : peak-to-trough drawdown on the paper equity curve breaches -20%.
+#                (A dollar-drawdown proxy for the backtest gate's -15R ceiling --
+#                not an exact unit conversion, since R-multiples and a compounding
+#                $ equity curve with concurrent positions don't map 1:1. Chosen to
+#                be a comparably strict ceiling in the same spirit.)
+#   TIME STOP  : after 180 days (~6 months) forward, if fewer than 15 forward trades
+#                have closed OR mean forward R is <= 0, the trial is INCONCLUSIVE-
+#                LEANING-NEGATIVE and stops -- "not enough data yet" does not get to
+#                extend indefinitely once 6 months have passed.
+# Either trigger writes KILL_FLAG_PATH once and stays flagged (this script does not
+# un-flag itself -- clearing it is a deliberate human decision).
+HARD_STOP_DRAWDOWN_PCT = -20.0
+TIME_STOP_DAYS = 180
+TIME_STOP_MIN_TRADES = 15
+
+
+def check_kill_criteria(days: int, port, forward_trades) -> str | None:
+    if port.max_drawdown_pct <= HARD_STOP_DRAWDOWN_PCT:
+        return (f"HARD STOP: paper drawdown {port.max_drawdown_pct:.1f}% breached "
+                f"{HARD_STOP_DRAWDOWN_PCT:.0f}% ceiling.")
+    if days >= TIME_STOP_DAYS:
+        closed = [t for t in forward_trades if t.exit_time is not None]
+        mean_r = (sum(t.R for t in closed) / len(closed)) if closed else None
+        if len(closed) < TIME_STOP_MIN_TRADES or (mean_r is not None and mean_r <= 0):
+            return (f"TIME STOP: {days} days elapsed, {len(closed)} forward trades "
+                    f"closed (need >={TIME_STOP_MIN_TRADES}), mean forward R="
+                    f"{mean_r if mean_r is not None else 'n/a'} -- inconclusive-"
+                    f"leaning-negative, not extending further.")
+    return None
+
+
+def _load_start(today: str, persist: bool) -> str:
+    if os.path.exists(STATE_PATH):
+        with open(STATE_PATH) as f:
+            return json.load(f).get("paper_start", today)
+    if persist:
+        os.makedirs(config.OUTPUT_DIR, exist_ok=True)
+        with open(STATE_PATH, "w") as f:
+            json.dump({"paper_start": today}, f)
+    return today
+
+
+def main():
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--no-log", action="store_true")
+    args = ap.parse_args()
+
+    today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    paper_start = _load_start(today, persist=not args.no_log)
+    start_date = date.fromisoformat(paper_start)
+
+    strategy = DonchianStrategy()  # unmodified config.DONCHIAN, long_only=True
+    max_hold = strategy.p["max_hold_bars"]
+    feed = CryptoUSFeed()
+
+    all_trades, last_bar, per_symbol = [], {}, {}
+    for sym in UNIVERSE:
+        df = feed.get_ohlcv(sym, strategy.interval, config.FETCH_BARS)
+        if df is None or len(df) < config.DONCHIAN["sma_trend"] + 10:
+            continue
+        tr = simulate(df, strategy, sym, config.cost_for(sym), max_hold)
+        per_symbol[sym] = tr
+        all_trades.extend(tr)
+        last_bar[sym] = df.index[-1]
+    all_trades.sort(key=lambda t: t.signal_time)
+
+    def is_open(t, lb):
+        return t.exit_time == lb and t.outcome == "TIME" and t.bars_held < max_hold
+
+    forward_open, preexisting_open, entered_today, exited_today = [], [], [], []
+    for sym, trs in per_symbol.items():
+        lb = last_bar[sym]
+        for t in trs:
+            if t.entry_time.date() == lb.date() and t.entry_time.date() >= start_date:
+                entered_today.append(t)
+            if t.exit_time == lb and not is_open(t, lb) and t.entry_time.date() >= start_date:
+                exited_today.append(t)
+        if trs and is_open(trs[-1], lb):
+            (forward_open if trs[-1].entry_time.date() >= start_date else preexisting_open).append(trs[-1])
+
+    forward_trades = [t for t in all_trades if t.entry_time.date() >= start_date]
+    P = config.PORTFOLIO
+    port = simulate_portfolio(forward_trades, P["starting_capital"], P["risk_pct"],
+                              P["max_concurrent"], P["fractional"], P["min_position_cash"])
+    days = (date.fromisoformat(today) - start_date).days
+
+    if os.path.exists(KILL_FLAG_PATH):
+        with open(KILL_FLAG_PATH) as f:
+            prior = json.load(f)
+        print("\n" + "!" * 70)
+        print(f"  ALREADY KILLED on {prior['killed_on']}: {prior['reason']}")
+        print("  (clearing this flag is a deliberate human decision, not automatic)")
+        print("!" * 70)
+    else:
+        kill_reason = check_kill_criteria(days, port, forward_trades)
+        if kill_reason:
+            with open(KILL_FLAG_PATH, "w") as f:
+                json.dump({"killed_on": today, "reason": kill_reason}, f, indent=2)
+            print("\n" + "!" * 70)
+            print(f"  KILL CRITERION TRIGGERED: {kill_reason}")
+            print("!" * 70)
+
+    print("\n" + "=" * 70)
+    print(f"  PAPER MONITOR (FX/commodity) — long-only Donchian, baseline 2.5R   {today} UTC")
+    print(f"  paper start: {paper_start}   universe: {', '.join(UNIVERSE)}   start ${P['starting_capital']:.0f}")
+    print("=" * 70)
+    print(f"\n  FORWARD PAPER EQUITY: ${port.final_capital:.2f}  ({port.return_pct:+.1f}%)  "
+          f"over {days} day(s), {port.taken} trade(s) taken")
+    if days == 0:
+        print("  (day 1 -- starting flat; the forward record builds from here)")
+
+    print(f"\n-- YOUR OPEN PAPER POSITIONS ({len(forward_open)}) --")
+    if not forward_open:
+        print("  (none -- flat, waiting for a breakout)")
+    for t in forward_open:
+        print(f"  {t.symbol:<10} {t.direction:<5} since {t.entry_time.date()}  entry {t.entry_fill:.4f}  "
+              f"stop {t.stop:.4f}  target {t.target:.4f}  unrealised {t.R:+.2f}R")
+
+    print(f"\n-- ENTER TODAY ({len(entered_today)}) --")
+    if not entered_today:
+        print("  (no new breakouts today)")
+    for t in entered_today:
+        print(f"  {t.direction} {t.symbol:<10} ~{t.entry_fill:.4f}  stop {t.stop:.4f}  "
+              f"target {t.target:.4f}  (conv {t.conviction:.2f})")
+
+    print(f"\n-- EXITED TODAY ({len(exited_today)}) --")
+    if not exited_today:
+        print("  (no exits today)")
+    for t in exited_today:
+        print(f"  {t.symbol:<10} {t.outcome}  realised {t.R:+.2f}R")
+
+    if preexisting_open:
+        names = ", ".join(f"{t.symbol}({t.R:+.1f}R)" for t in preexisting_open)
+        print(f"\n  (info: strategy is mid-trend on {names} from before paper start -- NOT counted)")
+
+    if not args.no_log:
+        new = not os.path.exists(EQUITY_PATH)
+        with open(EQUITY_PATH, "a", newline="") as f:
+            w = csv.writer(f)
+            if new:
+                w.writerow(["date", "forward_equity", "return_pct", "open", "entered", "exited"])
+            w.writerow([today, port.final_capital, port.return_pct,
+                        len(forward_open), len(entered_today), len(exited_today)])
+        print(f"\n  appended snapshot -> {EQUITY_PATH}")
+    print()
+
+
+if __name__ == "__main__":
+    main()

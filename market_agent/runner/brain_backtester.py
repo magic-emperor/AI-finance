@@ -95,19 +95,36 @@ MIN_WIN_RATE    = 0.60   # 60% win rate required
 MIN_PROFIT_FACTOR = 1.20 # gross_profit / gross_loss >= 1.2
 MIN_TRADES      = 30     # minimum trades for statistical significance
 
-# Regime filtering: only take signals in regimes the brain is designed for
-BRAIN_REGIME_GATES = {
-    'multi_modal_fusion': ['RANGING', 'SQUEEZE', 'MEAN_REVERTING'],
-    'multi_timeframe':    ['TRENDING_UP', 'TRENDING_DOWN',
-                           'TRENDING_UP_STRONG', 'TRENDING_DOWN_STRONG',
-                           'TRENDING_UP_WEAK', 'TRENDING_DOWN_WEAK'],
-    'cross_stock_gnn':    ['VOLATILE', 'RANGING', 'TRENDING_UP', 'TRENDING_DOWN',
-                           'TRENDING_UP_WEAK', 'TRENDING_DOWN_WEAK'],
-    # Match coordinator gate: Liquidity-Sweep runs in volatility/trend regimes.
-    # Note: the brain itself is more selective directionally (e.g., BUY may be blocked in TRENDING_*).
-    'liquidity_sweep':    ['VOLATILE', 'TRENDING_UP', 'TRENDING_DOWN'],
-    'regime_ensemble':    ['ALL'],   # meta brain — not directional
+# Regime filtering: only take signals in regimes the brain is designed for.
+#
+# WAS a hand-maintained duplicate of signal_generators.BRAIN_REGIME_GATES_UNIFIED
+# (the comment even said "Match coordinator gate"), which is exactly how it
+# went stale: today's fix adding RANGING to the live coordinator's Liquidity-
+# Sweep gate had no effect here, because this was a separate copy nobody
+# re-synced. Found via the decision log itself -- 138/316 bars in a smoke
+# test were rejected with "not permitted in RANGING/SQUEEZE" using the OLD
+# list, even though the live pipeline now allows RANGING. Importing the
+# real source instead of copying it means this can't drift again.
+from market_agent.brain.signal_generators import BRAIN_REGIME_GATES_UNIFIED
+
+_BACKTESTER_TO_COORDINATOR_NAME = {
+    'multi_modal_fusion': 'Multi-Modal-Fusion',
+    'multi_timeframe':    'Multi-Timeframe',
+    'cross_stock_gnn':    'Cross-Stock-GNN',
+    'liquidity_sweep':    'Liquidity-Sweep',
+    'regime_ensemble':    'Regime-Ensemble',
 }
+BRAIN_REGIME_GATES = {
+    backtester_name: BRAIN_REGIME_GATES_UNIFIED.get(coordinator_name, ['ALL'])
+    for backtester_name, coordinator_name in _BACKTESTER_TO_COORDINATOR_NAME.items()
+}
+# multi_modal_fusion's live gate is ['RANGING', 'SQUEEZE'] only -- MEAN_REVERTING
+# was a pre-unification regime label this backtester carried from before the
+# regime taxonomy was normalized; keep it for backward compatibility with any
+# regime-ensemble output that still emits it during the transition.
+BRAIN_REGIME_GATES['multi_modal_fusion'] = list(
+    set(BRAIN_REGIME_GATES['multi_modal_fusion']) | {'MEAN_REVERTING'}
+)
 
 
 # =============================================================================
@@ -132,36 +149,90 @@ def fetch_binance_ohlcv(
     return None # Placeholder, as actual implementation is elsewhere
 
 
-def load_symbol_data(symbol: str, days: int = 365) -> Optional[pd.DataFrame]:
-    """Load OHLCV from market_data system."""
+# Trading minutes/day per asset class, used to convert a day-count into a bar
+# count for ANY interval (previously hardcoded assuming 1h bars only).
+_TRADING_MINUTES_PER_DAY = {
+    'CRYPTO': 24 * 60, 'FOREX': 24 * 60, 'COMMODITY': 23 * 60,
+    'EQUITY_INDIA': 375,   # NSE 09:15-15:30
+    'EQUITY_US': 390,      # 09:30-16:00 ET
+    'INDEX': 375, 'UNKNOWN': 390,
+}
+_INTERVAL_MINUTES = {'1m': 1, '5m': 5, '15m': 15, '30m': 30, '1h': 60, '4h': 240, '1d': 1440}
+
+
+def _asset_class(symbol: str) -> str:
+    s = symbol.upper()
+    if s.endswith('-USD') or 'BTC' in s or 'ETH' in s:
+        return 'CRYPTO'
+    if s.endswith('.NS') or s.endswith('.BO'):
+        return 'EQUITY_INDIA'
+    if s.endswith('=X'):
+        return 'FOREX'
+    if s.endswith('=F'):
+        return 'COMMODITY'
+    return 'EQUITY_US'
+
+
+def load_symbol_data(symbol: str, days: int = 365, interval: str = '1h') -> Optional[pd.DataFrame]:
+    """
+    Load OHLCV from market_data system, on the requested interval.
+
+    Previously hardcoded to interval='1h' with a bars-per-day table that
+    only made sense for 1h bars — a --days request for 1m data would have
+    asked for 1/60th the bars actually needed. Bar count is now derived
+    from real trading-minutes-per-day divided by the interval's minutes.
+    """
     try:
-        from market_agent.data.ingestion.unified_market_data import market_data
+        from market_agent.data.storage.postgres import PostgresStorage
 
-        # Asset-class aware bar count
-        asset_bars = {
-            'CRYPTO': 24, 'FOREX': 24, 'COMMODITY': 23,
-            'EQUITY_INDIA': 6, 'EQUITY_US': 7, 'INDEX': 6, 'UNKNOWN': 7,
-        }
-        s = symbol.upper()
-        if s.endswith('-USD') or 'BTC' in s or 'ETH' in s:
-            ac = 'CRYPTO'
-        elif s.endswith('.NS') or s.endswith('.BO'):
-            ac = 'EQUITY_INDIA'
-        elif s.endswith('=X'):
-            ac = 'FOREX'
-        elif s.endswith('=F'):
-            ac = 'COMMODITY'
-        else:
-            ac = 'EQUITY_US'
+        ac = _asset_class(symbol)
+        interval_min = _INTERVAL_MINUTES.get(interval, 60)
+        bars_per_day = max(1, _TRADING_MINUTES_PER_DAY.get(ac, 390) // interval_min)
+        bars = days * bars_per_day + WARMUP_BARS
 
-        bars = days * asset_bars.get(ac, 7) + WARMUP_BARS
-        df = market_data.get_ohlcv(symbol, interval='1h', bars=bars)
-        if df is None or len(df) < WARMUP_BARS + 50:
-            logger.warning(f'  {symbol}: insufficient data')
+        # STEP 0 (plan): read the validated store DIRECTLY. Previously this went
+        # through market_data.get_ohlcv(), which silently falls back to a LIVE
+        # yfinance fetch whenever the DB holds <90% of the requested bars. That
+        # fallback bypasses normalize_bar_timestamp() and the Breeze
+        # cross-validation, and it is how 166 of 584 trades (28%) in the
+        # 2026-09-13 run came from unvalidated data while the run reported
+        # success. A backtest that quietly substitutes a different data source
+        # produces numbers nobody can act on, so this now reads one source only
+        # and reports exactly what it got.
+        storage = PostgresStorage()
+        rows = storage.get_latest_data(symbol, interval, limit=bars)
+        if not rows:
+            logger.warning(f'  {symbol} {interval}: NO DATA in validated store — SKIPPING')
             return None
+
+        df = pd.DataFrame(
+            [r['data'] for r in rows], index=[r['timestamp'] for r in rows]
+        ).sort_index()
+        for col in ('Open', 'High', 'Low', 'Close'):
+            if col not in df.columns:
+                logger.warning(f'  {symbol} {interval}: missing {col} column — SKIPPING')
+                return None
+
+        if len(df) < WARMUP_BARS + 50:
+            logger.warning(
+                f'  {symbol} {interval}: only {len(df)} bars in store '
+                f'(need >{WARMUP_BARS + 50}) — SKIPPING (no live fallback)'
+            )
+            return None
+
+        # Always state actual coverage, so no run can claim depth it does not have.
+        got_pct = 100.0 * len(df) / bars if bars else 0.0
+        span_days = (df.index[-1] - df.index[0]).days
+        msg = (f'  {symbol} {interval}: {len(df)} bars '
+               f'({df.index[0].date()} -> {df.index[-1].date()}, {span_days}d span) '
+               f'= {got_pct:.0f}% of {bars} requested')
+        if got_pct < 90.0:
+            logger.warning(msg + '  <-- SHORT OF REQUEST (vendor depth limit)')
+        else:
+            logger.info(msg)
         return df
     except Exception as e:
-        logger.error(f'  {symbol}: load failed — {e}')
+        logger.error(f'  {symbol} {interval}: load failed — {e}')
         return None
 
 
@@ -324,26 +395,51 @@ def run_cross_stock_gnn(hist: pd.DataFrame, symbol: str, regime: str = 'RANGING'
     return None
 
 
-def run_liquidity_sweep(hist: pd.DataFrame, symbol: str, regime: str) -> Optional[dict]:
-    """Run Liquidity-Sweep brain (requires regime input)."""
+def run_liquidity_sweep_logged(hist: pd.DataFrame, symbol: str, regime: str) -> dict:
+    """
+    Run Liquidity-Sweep brain and ALWAYS return full decision info, whether
+    it fired or held. Previously (run_liquidity_sweep) returned None on
+    every HOLD, so the backtest recorded nothing at all about the ~99% of
+    bars where the brain declined to trade — no gate name, no reason, no
+    confidence. That made "why is it always on hold" unanswerable except by
+    re-running one bar at a time by hand. Every bar's decision is now
+    logged by the caller regardless of outcome.
+    """
     try:
         from market_agent.brain.liquidity_sweep import liquidity_sweep_signal
         from market_agent.brain.brain_utils import calc_atr
 
+        from market_agent.brain.liquidity_sweep import DECISION_CODE_TO_GATE
+
         bs  = liquidity_sweep_signal(hist, symbol=symbol, regime=regime)
         atr = calc_atr(hist, 14)
-        if bs.direction in ('BUY', 'SELL') and bs.effective_confidence() >= MIN_CONFIDENCE:
-            return {
-                'direction':  bs.direction,
-                'confidence': bs.effective_confidence(),
-                'atr':        atr,
-                't1_mult':    bs.rr_t1_mult or 2.0,
-                'sl_mult':    bs.rr_sl_mult or 0.75,
-                'evidence':   (bs.primary_evidence or '')[:60],
-            }
+        eff_conf = bs.effective_confidence()
+        fired = bs.direction in ('BUY', 'SELL') and eff_conf >= MIN_CONFIDENCE
+        code = bs.measurements.get('decision_factor') if bs.measurements else None
+        gate = DECISION_CODE_TO_GATE.get(code, 'UNKNOWN') if code is not None else 'UNKNOWN'
+        return {
+            'fired':      fired,
+            'direction':  bs.direction,
+            'confidence': eff_conf,
+            'gate':       gate,
+            'evidence':   (bs.primary_evidence or '')[:120],
+            'atr':        atr,
+            't1_mult':    bs.rr_t1_mult or 2.0,
+            'sl_mult':    bs.rr_sl_mult or 0.75,
+        }
     except Exception as e:
-        logger.debug(f'Liquidity-Sweep error: {e}')
-    return None
+        return {
+            'fired': False, 'direction': 'HOLD', 'confidence': 0.0, 'gate': 'EXCEPTION',
+            'evidence': f'{type(e).__name__}: {str(e)[:100]}', 'atr': 0.0,
+            't1_mult': 2.0, 'sl_mult': 0.75,
+        }
+
+
+def run_liquidity_sweep(hist: pd.DataFrame, symbol: str, regime: str) -> Optional[dict]:
+    """Legacy contract (returns None on HOLD) — kept for other callers.
+    New code should use run_liquidity_sweep_logged() instead."""
+    sig = run_liquidity_sweep_logged(hist, symbol, regime)
+    return sig if sig['fired'] else None
 
 
 # =============================================================================
@@ -366,6 +462,25 @@ def compute_metrics(trades: List[dict]) -> dict:
     total       = len(trades)
 
     win_rate      = win_count / total if total > 0 else 0.0
+
+    # STEP 0 (plan): `win_rate` above counts ANY r>0 as a win, which includes
+    # EXPIRED trades (neither target nor stop hit within max_hold, closed at
+    # market) that happened to close green. That is NOT the strategy's thesis
+    # working. On 2026-09-13 this made a brain look like 35.3% WR / +54.1R when
+    # the thesis-only numbers were 27.4% WR / +9.6R -- 82% of the "profit" came
+    # from trades where the thesis explicitly failed. These fields are mandatory
+    # now so that distortion can never be reported without its correction.
+    outcomes        = [t.get('outcome', '') for t in trades]
+    strict_wins     = sum(1 for o in outcomes if o == 'WIN')
+    expired_trades  = [t for t in trades if t.get('outcome') == 'EXPIRED']
+    thesis_trades   = [t for t in trades if t.get('outcome') in ('WIN', 'LOSS')]
+    expired_r       = sum(t['r'] for t in expired_trades)
+    total_r         = sum(r_values)
+
+    strict_win_rate   = strict_wins / total if total else 0.0
+    thesis_total_r    = sum(t['r'] for t in thesis_trades)
+    thesis_avg_r      = (thesis_total_r / len(thesis_trades)) if thesis_trades else 0.0
+    pct_r_from_expiry = (expired_r / total_r) if total_r else 0.0
     gross_profit  = sum(wins)
     gross_loss    = abs(sum(losses))
     profit_factor = gross_profit / gross_loss if gross_loss > 0 else float('inf')
@@ -410,6 +525,14 @@ def compute_metrics(trades: List[dict]) -> dict:
     return {
         'total_trades':       total,
         'win_rate':           round(win_rate, 4),
+        # Mandatory thesis-vs-timeout breakdown (see note above).
+        'strict_win_rate':    round(strict_win_rate, 4),
+        'thesis_trades':      len(thesis_trades),
+        'thesis_total_r':     round(thesis_total_r, 3),
+        'thesis_avg_r':       round(thesis_avg_r, 4),
+        'expired_trades':     len(expired_trades),
+        'expired_r':          round(expired_r, 3),
+        'pct_r_from_expiry':  round(pct_r_from_expiry, 4),
         'profit_factor':      round(profit_factor, 3),
         'avg_r':              round(avg_r, 4),
         'avg_win_r':          round(avg_win, 4),
@@ -449,20 +572,29 @@ def backtest_brain(
     symbols:     List[str],
     days:        int = 365,
     use_regime_filter: bool = True,
+    interval:    str = '1h',
+    log_all_decisions: bool = False,
 ) -> dict:
     """
     Run a full walk-forward backtest for one brain across all symbols.
 
-    Returns performance metrics dict.
+    `log_all_decisions=True` (currently only wired for liquidity_sweep via
+    run_liquidity_sweep_logged) records EVERY bar's decision — fired or
+    held, with the exact gate and human-readable reason — not just the
+    bars that produced a trade. Previously a HOLD vanished with no trace,
+    so "why did it not fire on a bar that looked obviously tradeable" was
+    unanswerable without re-running that one bar by hand.
+
+    Returns (metrics, trades, decision_log).
     """
     allowed_regimes = BRAIN_REGIME_GATES.get(brain_name, ['ALL'])
     all_trades: List[dict] = []
-    skipped_signals = 0
+    decision_log: List[dict] = []
     total_signals   = 0
 
     for symbol in symbols:
-        logger.info(f'  {symbol}...')
-        df = load_symbol_data(symbol, days=days)
+        logger.info(f'  {symbol} [{interval}]...')
+        df = load_symbol_data(symbol, days=days, interval=interval)
         if df is None:
             continue
 
@@ -470,18 +602,41 @@ def backtest_brain(
 
         for i in range(WARMUP_BARS, n - MAX_HOLD_BARS - 2, STEP_BARS):
             hist_window = df.iloc[:i + 1].copy()
+            timestamp = df.index[i]
 
             # Get regime for this bar (used for filtering)
             regime = 'RANGING'
             if use_regime_filter:
                 regime = get_regime_at_bar(hist_window, symbol)
 
-            # Check regime gate — only apply when regime filter is active
-            if use_regime_filter and 'ALL' not in allowed_regimes and regime not in allowed_regimes:
+            regime_blocked = (use_regime_filter and 'ALL' not in allowed_regimes
+                             and regime not in allowed_regimes)
+            if regime_blocked and not log_all_decisions:
+                continue
+
+            if log_all_decisions and regime_blocked:
+                decision_log.append({
+                    'symbol': symbol, 'interval': interval, 'bar': i,
+                    'timestamp': str(timestamp), 'regime': regime,
+                    'fired': False, 'gate': 'GATE_REGIME_FILTER_EXTERNAL',
+                    'confidence': 0.0,
+                    'evidence': f'{brain_name} not permitted in {regime} '
+                               f'(allowed: {allowed_regimes})',
+                })
                 continue
 
             # Run the brain (some brains require regime input)
-            if brain_name in ('cross_stock_gnn', 'liquidity_sweep'):
+            if log_all_decisions and brain_name == 'liquidity_sweep':
+                sig = run_liquidity_sweep_logged(hist_window, symbol, regime)
+                decision_log.append({
+                    'symbol': symbol, 'interval': interval, 'bar': i,
+                    'timestamp': str(timestamp), 'regime': regime,
+                    'fired': sig['fired'], 'gate': sig.get('gate', ''),
+                    'confidence': sig['confidence'], 'evidence': sig.get('evidence', ''),
+                })
+                if not sig['fired']:
+                    continue
+            elif brain_name in ('cross_stock_gnn', 'liquidity_sweep'):
                 sig = brain_fn(hist_window, symbol, regime)
             else:
                 sig = brain_fn(hist_window, symbol)
@@ -490,11 +645,8 @@ def backtest_brain(
                 continue
 
             total_signals += 1
-
-            # Get ATR at signal bar
             atr = sig.get('atr', 0.0)
 
-            # Simulate the trade
             outcome, r = simulate_trade(
                 hist        = df,
                 entry_idx   = i,
@@ -506,8 +658,10 @@ def backtest_brain(
 
             all_trades.append({
                 'symbol':     symbol,
+                'interval':   interval,
                 'bar':        i,
-                'date':       str(df.index[i])[:10],
+                'timestamp':  str(timestamp),
+                'date':       str(timestamp)[:10],
                 'direction':  sig['direction'],
                 'confidence': sig['confidence'],
                 'regime':     regime,
@@ -519,8 +673,156 @@ def backtest_brain(
     metrics = compute_metrics(all_trades)
     metrics['total_signals_generated'] = total_signals
     metrics['trades_after_regime_gate'] = len(all_trades)
+    metrics['interval'] = interval
 
-    return metrics, all_trades
+    return metrics, all_trades, decision_log
+
+
+# =============================================================================
+# TWO-TIMEFRAME BACKTEST (liquidity_sweep_htf_ltf) — separate walk-forward
+# loop because it needs two aligned series, which doesn't fit the single-
+# DataFrame loop backtest_brain() uses for every other brain.
+# =============================================================================
+
+def backtest_liquidity_sweep_htf_ltf(
+    symbols:  List[str],
+    days:     int = 365,
+    htf:      str = '30m',
+    ltf:      str = '5m',
+    use_regime_filter: bool = True,
+    log_all_decisions: bool = True,
+) -> Tuple[dict, list, list]:
+    """
+    Walk forward on the LTF series (entries/exits happen at LTF granularity).
+    At each LTF bar, the HTF window used for level-finding is every HTF bar
+    with timestamp <= the current LTF bar's timestamp -- found by binary
+    search on the sorted HTF index, so no future HTF bar can leak in.
+    """
+    from market_agent.brain.liquidity_sweep import (
+        liquidity_sweep_htf_ltf_signal, DECISION_CODE_TO_GATE,
+    )
+    from market_agent.brain.brain_utils import calc_atr
+
+    allowed_regimes = BRAIN_REGIME_GATES.get('liquidity_sweep', ['ALL'])
+    all_trades: List[dict] = []
+    decision_log: List[dict] = []
+    total_signals = 0
+
+    for symbol in symbols:
+        logger.info(f'  {symbol} [{htf}->{ltf}]...')
+        df_htf = load_symbol_data(symbol, days=days, interval=htf)
+        df_ltf = load_symbol_data(symbol, days=days, interval=ltf)
+        if df_htf is None or df_ltf is None:
+            continue
+
+        # unified_market_data.get_ohlcv() can return tz-aware data for one
+        # interval and tz-naive for another on the SAME symbol (confirmed:
+        # ^NSEBANK 30m came back tz-aware 'Asia/Kolkata' via a live yfinance
+        # fallback, while 5m came from Postgres already tz-naive) --
+        # searchsorted() below cannot compare a tz-aware and tz-naive index.
+        # The single-timeframe backtester never surfaced this because it
+        # only ever loads one series; comparing two is what this function
+        # introduces. Normalized here rather than in the shared loader,
+        # which other callers depend on unchanged.
+        if df_htf.index.tz is not None:
+            df_htf = df_htf.copy()
+            df_htf.index = df_htf.index.tz_convert('UTC').tz_localize(None)
+        if df_ltf.index.tz is not None:
+            df_ltf = df_ltf.copy()
+            df_ltf.index = df_ltf.index.tz_convert('UTC').tz_localize(None)
+
+        htf_index = df_htf.index
+        n = len(df_ltf)
+
+        for i in range(WARMUP_BARS, n - MAX_HOLD_BARS - 2, STEP_BARS):
+            ltf_window = df_ltf.iloc[:i + 1]
+            timestamp  = df_ltf.index[i]
+
+            # HTF bars up to (not including) the current LTF timestamp —
+            # binary search on the sorted index, no future HTF bar leaks in.
+            htf_cutoff = htf_index.searchsorted(timestamp, side='right')
+            if htf_cutoff < WARMUP_BARS:
+                continue
+            htf_window = df_htf.iloc[:htf_cutoff]
+
+            regime = 'RANGING'
+            if use_regime_filter:
+                regime = get_regime_at_bar(ltf_window, symbol)
+
+            regime_blocked = (use_regime_filter and 'ALL' not in allowed_regimes
+                             and regime not in allowed_regimes)
+            if regime_blocked:
+                if log_all_decisions:
+                    decision_log.append({
+                        'symbol': symbol, 'htf': htf, 'ltf': ltf, 'bar': i,
+                        'timestamp': str(timestamp), 'regime': regime,
+                        'fired': False, 'gate': 'GATE_REGIME_FILTER_EXTERNAL',
+                        'confidence': 0.0,
+                        'evidence': f'liquidity_sweep not permitted in {regime} '
+                                   f'(allowed: {allowed_regimes})',
+                    })
+                continue
+
+            try:
+                bs = liquidity_sweep_htf_ltf_signal(
+                    htf_window, ltf_window, symbol=symbol, regime=regime,
+                    htf_label=htf, ltf_label=ltf,
+                )
+                eff_conf = bs.effective_confidence()
+                fired = bs.direction in ('BUY', 'SELL') and eff_conf >= MIN_CONFIDENCE
+                code = bs.measurements.get('decision_factor') if bs.measurements else None
+                gate = DECISION_CODE_TO_GATE.get(code, 'UNKNOWN') if code is not None else 'UNKNOWN'
+                evidence = (bs.primary_evidence or '')[:120]
+                atr = calc_atr(ltf_window, 14)
+            except Exception as e:
+                fired = False
+                gate = 'EXCEPTION'
+                evidence = f'{type(e).__name__}: {str(e)[:100]}'
+                bs = None
+                atr = 0.0
+
+            if log_all_decisions:
+                decision_log.append({
+                    'symbol': symbol, 'htf': htf, 'ltf': ltf, 'bar': i,
+                    'timestamp': str(timestamp), 'regime': regime,
+                    'fired': fired, 'gate': gate,
+                    'confidence': eff_conf if fired or bs else 0.0,
+                    'evidence': evidence,
+                })
+
+            if not fired:
+                continue
+
+            total_signals += 1
+            outcome, r = simulate_trade(
+                hist        = df_ltf,
+                entry_idx   = i,
+                direction   = bs.direction,
+                atr         = atr,
+                t1_mult     = bs.rr_t1_mult or 2.0,
+                sl_mult     = bs.rr_sl_mult or 0.75,
+            )
+            all_trades.append({
+                'symbol':     symbol,
+                'htf':        htf, 'ltf': ltf,
+                'bar':        i,
+                'timestamp':  str(timestamp),
+                'date':       str(timestamp)[:10],
+                'direction':  bs.direction,
+                'confidence': eff_conf,
+                'regime':     regime,
+                'outcome':    outcome,
+                'r':          r,
+                'evidence':   evidence,
+            })
+
+    metrics = compute_metrics(all_trades)
+    metrics['total_signals_generated'] = total_signals
+    metrics['trades_after_regime_gate'] = len(all_trades)
+    metrics['htf'] = htf
+    metrics['ltf'] = ltf
+
+    return metrics, all_trades, decision_log
 
 
 # =============================================================================
@@ -552,10 +854,23 @@ def print_report(brain_name: str, metrics: dict, trades: list) -> None:
     print(f'  (Need: win_rate>={MIN_WIN_RATE:.0%}, '
           f'profit_factor>={MIN_PROFIT_FACTOR}, trades>={MIN_TRADES})')
 
+    print(f'\n  THESIS vs TIMEOUT  (does the strategy actually work, or is it the exit rule?)')
+    print(f'  {"Strict win rate:":<25} {metrics.get("strict_win_rate", 0):.1%}'
+          f'   (target hit before stop)')
+    print(f'  {"Thesis-only trades:":<25} {metrics.get("thesis_trades", 0)}'
+          f'  ->  {metrics.get("thesis_total_r", 0):+.1f}R total, '
+          f'{metrics.get("thesis_avg_r", 0):+.4f}R/trade')
+    print(f'  {"Expired (thesis failed):":<25} {metrics.get("expired_trades", 0)}'
+          f'  ->  {metrics.get("expired_r", 0):+.1f}R')
+    pct_exp = metrics.get('pct_r_from_expiry', 0)
+    exp_flag = '  <-- WARNING: most "profit" is the timeout exit, not the strategy' if pct_exp > 0.5 else ''
+    print(f'  {"% of R from timeouts:":<25} {pct_exp:.1%}{exp_flag}')
+
     print(f'\n  CORE METRICS')
     print(f'  {"Total trades:":<25} {t}')
     wr_flag = "✅" if wr >= MIN_WIN_RATE else "❌"
-    print(f'  {"Win rate:":<25} {wr:.1%}  {wr_flag}')
+    print(f'  {"Win rate (r>0):":<25} {wr:.1%}  {wr_flag}'
+          f'   (includes profitable timeouts — see above)')
     pf_flag = "✅" if pf >= MIN_PROFIT_FACTOR else "❌"
     print(f'  {"Profit factor:":<25} {pf:.3f}  {pf_flag}')
     print(f'  {"Average R:":<25} {ar:+.3f}R')
@@ -1019,6 +1334,16 @@ def main():
                         help='Disable regime gating (test brain in all regimes)')
     parser.add_argument('--save-csv', action='store_true',
                         help='Save trade log to CSV')
+    parser.add_argument('--interval', type=str, default='1h',
+                        help='Bar interval: 1m, 5m, 15m, 30m, 1h, 4h, 1d (default: 1h)')
+    parser.add_argument('--htf', type=str, default='30m',
+                        help='Higher timeframe for --brain liquidity_sweep_2tf (default: 30m)')
+    parser.add_argument('--ltf', type=str, default='5m',
+                        help='Lower/confirmation timeframe for --brain liquidity_sweep_2tf (default: 5m)')
+    parser.add_argument('--log-decisions', action='store_true',
+                        help='Log EVERY bar decision (fired or held) with gate and reason '
+                             'to a CSV, not just bars that produced a trade. '
+                             'Currently only wired for --brain liquidity_sweep.')
     parser.add_argument('--grid', action='store_true',
                         help='Run parameter grid search for multi_timeframe brain '
                              '(only runs if brain passes < 60%% WR or < 30 trades)')
@@ -1044,6 +1369,37 @@ def main():
         )
         return
 
+    # liquidity_sweep_2tf: the two-timeframe variant (HTF level, LTF
+    # confirmation) needs its own loop (two aligned series, not one), so it
+    # is dispatched separately rather than through backtest_brain().
+    if args.brain == 'liquidity_sweep_2tf':
+        t0 = time.time()
+        metrics, trades, decision_log = backtest_liquidity_sweep_htf_ltf(
+            symbols           = args.symbols,
+            days              = args.days,
+            htf               = args.htf,
+            ltf               = args.ltf,
+            use_regime_filter = use_regime,
+            log_all_decisions = args.log_decisions,
+        )
+        logger.info(f'  Done in {time.time()-t0:.1f}s')
+        print_report('liquidity_sweep_2tf', metrics, trades)
+
+        suffix = datetime.now().strftime('%Y%m%d')
+        if args.save_csv and trades:
+            csv_out = f'trades_liquidity_sweep_{args.htf}_{args.ltf}_{args.days}d_{suffix}.csv'
+            pd.DataFrame(trades).to_csv(csv_out, index=False)
+            logger.info(f'  Trades saved -> {csv_out}')
+        if args.log_decisions and decision_log:
+            log_out = f'decisions_liquidity_sweep_{args.htf}_{args.ltf}_{args.days}d_{suffix}.csv'
+            pd.DataFrame(decision_log).to_csv(log_out, index=False)
+            fired_n = sum(1 for d in decision_log if d['fired'])
+            logger.info(f'  Decision log saved -> {log_out} '
+                       f'({len(decision_log)} bars logged, {fired_n} fired)')
+            logger.info('  Gate breakdown:\n' +
+                       pd.DataFrame(decision_log)['gate'].value_counts().to_string())
+        return
+
     if args.brain == 'all':
         selected = brains_to_run
     elif args.brain in brains_to_run:
@@ -1060,12 +1416,14 @@ def main():
                     f'regime_filter={use_regime}')
         t0 = time.time()
 
-        metrics, trades = backtest_brain(
+        metrics, trades, decision_log = backtest_brain(
             brain_name          = brain_name,
             brain_fn            = brain_fn,
             symbols             = args.symbols,
             days                = args.days,
             use_regime_filter   = use_regime,
+            interval            = args.interval,
+            log_all_decisions   = args.log_decisions,
         )
 
         elapsed = time.time() - t0
@@ -1073,11 +1431,20 @@ def main():
 
         print_report(brain_name, metrics, trades)
 
+        suffix = datetime.now().strftime('%Y%m%d')
         if args.save_csv and trades:
-            suffix  = datetime.now().strftime('%Y%m%d')
-            csv_out = f'trades_{brain_name}_{args.days}d_{suffix}.csv'
+            csv_out = f'trades_{brain_name}_{args.interval}_{args.days}d_{suffix}.csv'
             pd.DataFrame(trades).to_csv(csv_out, index=False)
             logger.info(f'  Trades saved → {csv_out}')
+
+        if args.log_decisions and decision_log:
+            log_out = f'decisions_{brain_name}_{args.interval}_{args.days}d_{suffix}.csv'
+            pd.DataFrame(decision_log).to_csv(log_out, index=False)
+            fired_n = sum(1 for d in decision_log if d['fired'])
+            logger.info(f'  Decision log saved -> {log_out} '
+                       f'({len(decision_log)} bars logged, {fired_n} fired)')
+            gate_counts = pd.DataFrame(decision_log)['gate'].value_counts()
+            logger.info('  Gate breakdown:\n' + gate_counts.to_string())
 
         summary_rows.append({
             'brain':          brain_name,

@@ -1,0 +1,461 @@
+{
+  "run_started_at": "2026-09-15T16:50:17.332653",
+  "series": {
+    "APARINDS.NS|1d": {
+      "status": "SUCCESS",
+      "source": "yfinance",
+      "price_adjustment": "adjusted",
+      "rows_written": 2473,
+      "first_bar": "2016-09-15T00:00:00",
+      "last_bar": "2026-09-15T00:00:00",
+      "content_hash": "1263c05450fe55220c5734e2222fbc8a8529b48338321b37f17651faf140b15e"
+    },
+    "ASTRAL.NS|1d": {
+      "status": "SUCCESS",
+      "source": "yfinance",
+      "price_adjustment": "adjusted",
+      "rows_written": 2473,
+      "first_bar": "2016-09-15T00:00:00",
+      "last_bar": "2026-09-15T00:00:00",
+      "content_hash": "51b49b893799cde1b28717064c8026073706905dbf35339ba4a5a763beb2d604"
+    },
+    "BANKINDIA.NS|1d": {
+      "status": "SUCCESS",
+      "source": "yfinance",
+      "price_adjustment": "adjusted",
+      "rows_written": 2474,
+      "first_bar": "2016-09-15T00:00:00",
+      "last_bar": "2026-09-15T00:00:00",
+      "content_hash": "6cce17c9374012c399f38cd5c7543d0c99fa9943941366f576e28163edc860b5"
+    },
+    "BHEL.NS|1d": {
+      "status": "SUCCESS",
+      "source": "yfinance",
+      "price_adjustment": "adjusted",
+      "rows_written": 2474,
+      "first_bar": "2016-09-15T00:00:00",
+      "last_bar": "2026-09-15T00:00:00",
+      "content_hash": "bec12180fbf42e4f405178c086b010f3f05160d29e8d8b6ca68770dc1a203f09"
+    },
+    "COCHINSHIP.NS|1d": {
+      "status": "SUCCESS",
+      "source": "yfinance",
+      "price_adjustment": "adjusted",
+      "rows_written": 2249,
+      "first_bar": "2017-08-11T00:00:00",
+      "last_bar": "2026-09-15T00:00:00",
+      "content_hash": "943497dae2e49b5b85860d2f9c38a4c1c67cd17f08117f4ab1ee376c604502e9"
+    },
+    "COROMANDEL.NS|1d": {
+      "status": "SUCCESS",
+      "source": "yfinance",
+      "price_adjustment": "adjusted",
+      "rows_written": 2474,
+      "first_bar": "2016-09-15T00:00:00",
+      "last_bar": "2026-09-15T00:00:00",
+      "content_hash": "f3b70e2292101d9995174a19951a31e338b5fb947732599a3e10fc47b502a9bd"
+    },
+    "DIXON.NS|1d": {
+      "status": "SUCCESS",
+      "source": "yfinance",
+      "price_adjustment": "adjusted",
+      "rows_written": 2225,
+      "first_bar": "2017-09-18T00:00:00",
+      "last_bar": "2026-09-15T00:00:00",
+      "content_hash": "a55a47cad3b06c12908656e56c95b4650c78409c5a6e6a6e0b5c0114f9ca4223"
+    },
+    "FEDERALBNK.NS|1d": {
+      "status": "SUCCESS",
+      "source": "yfinance",
+      "price_adjustment": "adjusted",
+      "rows_written": 2474,
+      "first_bar": "2016-09-15T00:00:00",
+      "last_bar": "2026-09-15T00:00:00",
+      "content_hash": "114cf7af49069c6101a1aa1b37031b0154b91781679e24f0a63d49de376dbc64"
+    },
+    "GICRE.NS|1d": {
+      "status": "SUCCESS",
+      "source": "yfinance",
+      "price_adjustment": "adjusted",
+      "rows_written": 2199,
+      "first_bar": "2017-10-25T00:00:00",
+      "last_bar": "2026-09-15T00:00:00",
+      "content_hash": "da8c1d905e80426612f6661995025a0db5f5a43626d0cc50611531b9c351cdc5"
+    },
+    "GODFRYPHLP.NS|1d": {
+      "status": "SUCCESS",
+      "source": "yfinance",
+      "price_adjustment": "adjusted",
+      "rows_written": 2473,
+      "first_bar": "2016-09-15T00:00:00",
+      "last_bar": "2026-09-15T00:00:00",
+      "content_hash": "28cce91650ab4740f4259b2ce22814cdd9eb665fee2b5082765997da907bdc32"
+    },
+    "HEROMOTOCO.NS|1d": {
+      "status": "SUCCESS",
+      "source": "yfinance",
+      "price_adjustment": "adjusted",
+      "rows_written": 2474,
+      "first_bar": "2016-09-15T00:00:00",
+      "last_bar": "2026-09-15T00:00:00",
+      "content_hash": "6b9aef347e726ea908cbce4a56eaf44015da663fffa656a9dbd4223574161d57"
+    },
+    "HUDCO.NS|1d": {
+      "status": "SUCCESS",
+      "source": "yfinance",
+      "price_adjustment": "adjusted",
+      "rows_written": 2308,
+      "first_bar": "2017-05-19T00:00:00",
+      "last_bar": "2026-09-15T00:00:00",
+      "content_hash": "39061dccc5b759ed3c100753b2133401e3ba3a5209a386eeb5fd461b1309ce3a"
+    },
+    "IDFCFIRSTB.NS|1d": {
+      "status": "SUCCESS",
+      "source": "yfinance",
+      "price_adjustment": "adjusted",
+      "rows_written": 2474,
+      "first_bar": "2016-09-15T00:00:00",
+      "last_bar": "2026-09-15T00:00:00",
+      "content_hash": "24ec2e2cea572f3ea4b5c88166186d33cb43aa0cdb670f839097c8a874fd8796"
+    },
+    "INDUSTOWER.NS|1d": {
+      "status": "SUCCESS",
+      "source": "yfinance",
+      "price_adjustment": "adjusted",
+      "rows_written": 2474,
+      "first_bar": "2016-09-15T00:00:00",
+      "last_bar": "2026-09-15T00:00:00",
+      "content_hash": "a6dc19fda8aa0e12ec1cb592ad4fb86cdb219d466daab04f03e42f49c04cdb49"
+    },
+    "JSL.NS|1d": {
+      "status": "SUCCESS",
+      "source": "yfinance",
+      "price_adjustment": "adjusted",
+      "rows_written": 2473,
+      "first_bar": "2016-09-15T00:00:00",
+      "last_bar": "2026-09-15T00:00:00",
+      "content_hash": "04d937a8b78c714f3e4245d53aa301252a12148e43e5bde4b53c76eb5bb218e5"
+    },
+    "KPITTECH.NS|1d": {
+      "status": "SUCCESS",
+      "source": "yfinance",
+      "price_adjustment": "adjusted",
+      "rows_written": 1834,
+      "first_bar": "2019-04-22T00:00:00",
+      "last_bar": "2026-09-15T00:00:00",
+      "content_hash": "899a1d8bb426b17167542fe741b0a852536c923f213a08b6ff88cbb1ab9788ad"
+    },
+    "LICHSGFIN.NS|1d": {
+      "status": "SUCCESS",
+      "source": "yfinance",
+      "price_adjustment": "adjusted",
+      "rows_written": 2473,
+      "first_bar": "2016-09-15T00:00:00",
+      "last_bar": "2026-09-15T00:00:00",
+      "content_hash": "567d903acdb4a903eb6a29f80a4f0a9c0273aa4b90d9e314aeaa364822365ea6"
+    },
+    "M&MFIN.NS|1d": {
+      "status": "SUCCESS",
+      "source": "yfinance",
+      "price_adjustment": "adjusted",
+      "rows_written": 2474,
+      "first_bar": "2016-09-15T00:00:00",
+      "last_bar": "2026-09-15T00:00:00",
+      "content_hash": "2678f3fe0d13ccbfa8fe023e2502b7d9cb559c6e0b5f8e74c0b50dea82ceef09"
+    },
+    "MFSL.NS|1d": {
+      "status": "SUCCESS",
+      "source": "yfinance",
+      "price_adjustment": "adjusted",
+      "rows_written": 2473,
+      "first_bar": "2016-09-15T00:00:00",
+      "last_bar": "2026-09-15T00:00:00",
+      "content_hash": "3e04235a089db491e7a106c4fe49a3fb92ae39ccf2f6bcdf4e76b6c3a50087ea"
+    },
+    "MRF.NS|1d": {
+      "status": "SUCCESS",
+      "source": "yfinance",
+      "price_adjustment": "adjusted",
+      "rows_written": 2473,
+      "first_bar": "2016-09-15T00:00:00",
+      "last_bar": "2026-09-15T00:00:00",
+      "content_hash": "0d659777b10fabba382d3c99ccaab9a21d8d797f8c432579ef1e42c6088eafb4"
+    },
+    "NHPC.NS|1d": {
+      "status": "SUCCESS",
+      "source": "yfinance",
+      "price_adjustment": "adjusted",
+      "rows_written": 2474,
+      "first_bar": "2016-09-15T00:00:00",
+      "last_bar": "2026-09-15T00:00:00",
+      "content_hash": "1be6e4210b6f052ef074330590cba4b462e81178a289a407b5e42a8cf87d3c5c"
+    },
+    "OBEROIRLTY.NS|1d": {
+      "status": "SUCCESS",
+      "source": "yfinance",
+      "price_adjustment": "adjusted",
+      "rows_written": 2473,
+      "first_bar": "2016-09-15T00:00:00",
+      "last_bar": "2026-09-15T00:00:00",
+      "content_hash": "ac0a373462d980a170af8c7652a04cb4650d1af24c9739fdb87548b91362ed2c"
+    },
+    "PERSISTENT.NS|1d": {
+      "status": "SUCCESS",
+      "source": "yfinance",
+      "price_adjustment": "adjusted",
+      "rows_written": 2474,
+      "first_bar": "2016-09-15T00:00:00",
+      "last_bar": "2026-09-15T00:00:00",
+      "content_hash": "3e64329c748ce0b8ce13c84d5fa2037ac570953f7b4958c65a116327fdb2434f"
+    },
+    "POLYCAB.NS|1d": {
+      "status": "SUCCESS",
+      "source": "yfinance",
+      "price_adjustment": "adjusted",
+      "rows_written": 1836,
+      "first_bar": "2019-04-16T00:00:00",
+      "last_bar": "2026-09-15T00:00:00",
+      "content_hash": "6c61217dededfc34a03e2a7478e891f6137ac32e74524203faae339eea41288c"
+    },
+    "PATANJALI.NS|1d": {
+      "status": "SUCCESS",
+      "source": "yfinance",
+      "price_adjustment": "adjusted",
+      "rows_written": 2474,
+      "first_bar": "2016-09-15T00:00:00",
+      "last_bar": "2026-09-15T00:00:00",
+      "content_hash": "2f77d5009cddcabf1fb72de1818ae33adac2ab2733adb8eb60e80cc38d1cff6f"
+    },
+    "RVNL.NS|1d": {
+      "status": "SUCCESS",
+      "source": "yfinance",
+      "price_adjustment": "adjusted",
+      "rows_written": 1838,
+      "first_bar": "2019-04-11T00:00:00",
+      "last_bar": "2026-09-15T00:00:00",
+      "content_hash": "11c9f57385531b8c4e2e928f5304a8bd763be89ce288ec65233c6113264fd084"
+    },
+    "SAIL.NS|1d": {
+      "status": "SUCCESS",
+      "source": "yfinance",
+      "price_adjustment": "adjusted",
+      "rows_written": 2474,
+      "first_bar": "2016-09-15T00:00:00",
+      "last_bar": "2026-09-15T00:00:00",
+      "content_hash": "23e0b4eed93fad8b3e62f9d3043830f67400c5a9e4e693ab60d2b8458c904780"
+    },
+    "SBICARD.NS|1d": {
+      "status": "SUCCESS",
+      "source": "yfinance",
+      "price_adjustment": "adjusted",
+      "rows_written": 1612,
+      "first_bar": "2020-03-16T00:00:00",
+      "last_bar": "2026-09-15T00:00:00",
+      "content_hash": "c76de43f582a977937d77c488b68d9ddfdab618ddac8f6be94f18ea4625e2dfb"
+    },
+    "SCHAEFFLER.NS|1d": {
+      "status": "SUCCESS",
+      "source": "yfinance",
+      "price_adjustment": "adjusted",
+      "rows_written": 2473,
+      "first_bar": "2016-09-15T00:00:00",
+      "last_bar": "2026-09-15T00:00:00",
+      "content_hash": "f3554a3c70f57ca1fba448e54eb887e6cb39ba7e72cc6b501d529470cdbbdb72"
+    },
+    "SJVN.NS|1d": {
+      "status": "SUCCESS",
+      "source": "yfinance",
+      "price_adjustment": "adjusted",
+      "rows_written": 2473,
+      "first_bar": "2016-09-15T00:00:00",
+      "last_bar": "2026-09-15T00:00:00",
+      "content_hash": "4f04c0ea12987ad62304a05be09d624bbdb56ad9e5fdc264e3603ec4e41235bd"
+    },
+    "SRF.NS|1d": {
+      "status": "SUCCESS",
+      "source": "yfinance",
+      "price_adjustment": "adjusted",
+      "rows_written": 2473,
+      "first_bar": "2016-09-15T00:00:00",
+      "last_bar": "2026-09-15T00:00:00",
+      "content_hash": "81f62a9ee5b41805e4af457caf85947d74874f9be41277dbe2c18cd440b6223f"
+    },
+    "SUNDARMFIN.NS|1d": {
+      "status": "SUCCESS",
+      "source": "yfinance",
+      "price_adjustment": "adjusted",
+      "rows_written": 2473,
+      "first_bar": "2016-09-15T00:00:00",
+      "last_bar": "2026-09-15T00:00:00",
+      "content_hash": "7d1b01c25bc4afef38c937ffaf53a58a5f49761acd464852ef76c4fe4803dc0d"
+    },
+    "SUPREMEIND.NS|1d": {
+      "status": "SUCCESS",
+      "source": "yfinance",
+      "price_adjustment": "adjusted",
+      "rows_written": 2473,
+      "first_bar": "2016-09-15T00:00:00",
+      "last_bar": "2026-09-15T00:00:00",
+      "content_hash": "0b147ff244f7b7d8d6de28a10096387c4851e7ef50ffa0cf13359bd60c441f99"
+    },
+    "SUZLON.NS|1d": {
+      "status": "SUCCESS",
+      "source": "yfinance",
+      "price_adjustment": "adjusted",
+      "rows_written": 2474,
+      "first_bar": "2016-09-15T00:00:00",
+      "last_bar": "2026-09-15T00:00:00",
+      "content_hash": "7155c49fa662a630d3faa5d4a20d172636c6e2985f64fbd876d926f73dd614c0"
+    },
+    "TATACOMM.NS|1d": {
+      "status": "SUCCESS",
+      "source": "yfinance",
+      "price_adjustment": "adjusted",
+      "rows_written": 2473,
+      "first_bar": "2016-09-15T00:00:00",
+      "last_bar": "2026-09-15T00:00:00",
+      "content_hash": "70e17bd8764afed02fbdfacf996619f4d5c8b362ab61a3dd510d2e8a29edfbe6"
+    },
+    "TATAELXSI.NS|1d": {
+      "status": "SUCCESS",
+      "source": "yfinance",
+      "price_adjustment": "adjusted",
+      "rows_written": 2474,
+      "first_bar": "2016-09-15T00:00:00",
+      "last_bar": "2026-09-15T00:00:00",
+      "content_hash": "2551e44926514f2c9b6c72c22e646d927c0c64d1b79d434c53672cb1d8661c35"
+    },
+    "TATAINVEST.NS|1d": {
+      "status": "SUCCESS",
+      "source": "yfinance",
+      "price_adjustment": "adjusted",
+      "rows_written": 2474,
+      "first_bar": "2016-09-15T00:00:00",
+      "last_bar": "2026-09-15T00:00:00",
+      "content_hash": "74c0feed4a7fb825d891c64921d931c8616c841ae33f05b62a34c383d1a7e540"
+    },
+    "THERMAX.NS|1d": {
+      "status": "SUCCESS",
+      "source": "yfinance",
+      "price_adjustment": "adjusted",
+      "rows_written": 2473,
+      "first_bar": "2016-09-15T00:00:00",
+      "last_bar": "2026-09-15T00:00:00",
+      "content_hash": "36e3b5edb69dbc4184695a429043cab8f99d21f610ec6ba153ff9dcb9904c3fe"
+    },
+    "TIINDIA.NS|1d": {
+      "status": "SUCCESS",
+      "source": "yfinance",
+      "price_adjustment": "adjusted",
+      "rows_written": 2193,
+      "first_bar": "2017-11-02T00:00:00",
+      "last_bar": "2026-09-15T00:00:00",
+      "content_hash": "e5dd0709fe6c4bb9125c7842b64724418e0170b90062b56169d32d2a5d0a8800"
+    },
+    "TORNTPOWER.NS|1d": {
+      "status": "SUCCESS",
+      "source": "yfinance",
+      "price_adjustment": "adjusted",
+      "rows_written": 2473,
+      "first_bar": "2016-09-15T00:00:00",
+      "last_bar": "2026-09-15T00:00:00",
+      "content_hash": "d7789a9e89a6b173fd71b12db7baccc042c856bfaaf229bf614bb667557581d2"
+    },
+    "UBL.NS|1d": {
+      "status": "SUCCESS",
+      "source": "yfinance",
+      "price_adjustment": "adjusted",
+      "rows_written": 2473,
+      "first_bar": "2016-09-15T00:00:00",
+      "last_bar": "2026-09-15T00:00:00",
+      "content_hash": "42e2e82e32e07ebb33c4dddfcca096254eaccedbaf19528970be6263288a255e"
+    },
+    "UPL.NS|1d": {
+      "status": "SUCCESS",
+      "source": "yfinance",
+      "price_adjustment": "adjusted",
+      "rows_written": 2474,
+      "first_bar": "2016-09-15T00:00:00",
+      "last_bar": "2026-09-15T00:00:00",
+      "content_hash": "90be7b72453922e8bab7a6468de33da0f97ba5d9b9d908f69cb22a37cd229c98"
+    },
+    "VOLTAS.NS|1d": {
+      "status": "SUCCESS",
+      "source": "yfinance",
+      "price_adjustment": "adjusted",
+      "rows_written": 2474,
+      "first_bar": "2016-09-15T00:00:00",
+      "last_bar": "2026-09-15T00:00:00",
+      "content_hash": "e0b4d8c8c4181592bd915684ea95976b60e7b2ab532ce8ebd95aeecc76f69acd"
+    },
+    "YESBANK.NS|1d": {
+      "status": "SUCCESS",
+      "source": "yfinance",
+      "price_adjustment": "adjusted",
+      "rows_written": 2474,
+      "first_bar": "2016-09-15T00:00:00",
+      "last_bar": "2026-09-15T00:00:00",
+      "content_hash": "6c3096b7fc22dd3ee90bccc380b91bfa88de8031e979d9b1e7f432c17d7b5f92"
+    },
+    "AIIL.NS|1d": {
+      "status": "SUCCESS",
+      "source": "yfinance",
+      "price_adjustment": "adjusted",
+      "rows_written": 598,
+      "first_bar": "2024-04-23T00:00:00",
+      "last_bar": "2026-09-15T00:00:00",
+      "content_hash": "3127fb93fba8e5f0412ef40c256f86ebebb5699d2c240913e8547d236d21fef7"
+    },
+    "LLOYDSME.NS|1d": {
+      "status": "SUCCESS",
+      "source": "yfinance",
+      "price_adjustment": "adjusted",
+      "rows_written": 785,
+      "first_bar": "2023-07-17T00:00:00",
+      "last_bar": "2026-09-15T00:00:00",
+      "content_hash": "2accb32c7c4aad3acb8087a6d1d0f8f9ca85a84b9fecceeb92b39ba8ee770811"
+    },
+    "KALYANKJIL.NS|1d": {
+      "status": "SUCCESS",
+      "source": "yfinance",
+      "price_adjustment": "adjusted",
+      "rows_written": 1354,
+      "first_bar": "2021-03-26T00:00:00",
+      "last_bar": "2026-09-15T00:00:00",
+      "content_hash": "359fa98c8bdb78bced857e2f959e062c2ed1ee83c307098615f2dbf14b923eb0"
+    },
+    "PAYTM.NS|1d": {
+      "status": "SUCCESS",
+      "source": "yfinance",
+      "price_adjustment": "adjusted",
+      "rows_written": 1195,
+      "first_bar": "2021-11-18T00:00:00",
+      "last_bar": "2026-09-15T00:00:00",
+      "content_hash": "290e9fcfc6362b84f5c838ee7b6865c43c29abcedf4707f1ea8388306fffe3a2"
+    },
+    "LICI.NS|1d": {
+      "status": "SUCCESS",
+      "source": "yfinance",
+      "price_adjustment": "adjusted",
+      "rows_written": 1075,
+      "first_bar": "2022-05-17T00:00:00",
+      "last_bar": "2026-09-15T00:00:00",
+      "content_hash": "6d2d8866747f81fce210b68eddabd3350175bd1523a736e39e83c25c1683329d"
+    },
+    "SWIGGY.NS|1d": {
+      "status": "SUCCESS",
+      "source": "yfinance",
+      "price_adjustment": "adjusted",
+      "rows_written": 458,
+      "first_bar": "2024-11-13T00:00:00",
+      "last_bar": "2026-09-15T00:00:00",
+      "content_hash": "3e34eb0832c86d6db018f679c8ee5ad201fedf573e4a547a6dcf8a39e4b27f19"
+    }
+  },
+  "run_finished_at": "2026-09-15T16:51:04.411960",
+  "totals": {
+    "stored": 110332,
+    "skipped": 0,
+    "failed": 0
+  }
+}

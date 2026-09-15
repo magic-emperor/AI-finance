@@ -1,0 +1,7 @@
+# Minimal deps for the paper-trading CI job (engine.run_paper_fx_commodity).
+# Deliberately NOT the repo-root requirements.txt -- that pulls in torch,
+# playwright, sentence-transformers, faiss-cpu etc. for the old market_agent
+# stack, none of which this path touches. Keep CI fast and this list honest
+# about what the paper script actually imports.
+pandas>=2.0.0
+yfinance>=0.2.0

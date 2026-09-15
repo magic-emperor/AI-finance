@@ -1,387 +1,219 @@
-# CLAUDE.md — Trading Brain AI Agent Instructions
+# CLAUDE.md — Aegis Trading Brain: Agent Instructions
 
-> **This file is the single source of truth for every AI agent or developer
-> working on this codebase.** Read it fully before touching any file. No
-> exceptions.
+> **Single source of truth for every AI agent or developer working on this codebase.**
+> Read this fully before touching any file. No exceptions.
 
 ---
 
 ## 1. WHAT THIS SYSTEM IS
 
-This is a **multi-brain trading AI** for intraday (primary) and long-term
-(future) markets — currently focused on Indian equities (NSE/BSE). It consists
-of 8 specialist brains that each generate a `BrainSignal`, which is then debated
-and voted on by a council (`cortex.py`) before any trade decision is made.
+Aegis is a **multi-brain AI trading system** focused on intraday Indian equities (NSE/BSE).
+Eight specialist brains each produce a `BrainSignal`. A coordinator (`signal_generators.py`)
+applies regime gates and collects the signals. A Boss Brain (`cortex.py`) votes on them and
+issues a `CouncilVerdict`. Paper trading executes verdicts and the signal resolver tracks outcomes.
 
-The brains were making losses. We are now fixing them — **one brain at a time**
-— to be excellent at analysis and profitable in live trading.
-
-**Do not touch multiple brains at once. Fix one. Prove it. Move to the next.**
+**Current mission:** Connect the completed, tested brain pipeline to production so real trade
+outcomes accumulate in the DB — then use that data to backtest and harden each brain.
 
 ---
 
-## 2. THE BRAINS (Current Roster)
+## 2. BRAIN ROSTER (All files in `market_agent/brain/`)
 
-| Brain Name         | File                    | Regime                       | Specialization                         | Status |
-| ------------------ | ----------------------- | ---------------------------- | -------------------------------------- | ------ |
-| AMV-LSTM           | `amv_lstm.py`           | TRENDING_UP / DOWN           | Temporal trend memory, SMA 5/20 + LSTM | Active |
-| Regime-Ensemble    | `regime_ensemble.py`    | ALL                          | Market regime detection (meta brain)   | Active |
-| Multi-Modal-Fusion | `multi_modal_fusion.py` | RANGING / SQUEEZE            | RSI + MACD + sentiment fusion          | Active |
-| Multi-Timeframe    | `multi_timeframe.py`    | TRENDING_UP / DOWN           | Timeframe confluence (15m, 1h, 1d)     | Active |
-| Cross-Stock-GNN    | `cross_stock_gnn.py`    | VOLATILE / RANGING           | Sector correlation, institutional flow | Active |
-| RL-Weighter        | `rl_weighter.py`        | TRENDING / RANGING           | Kelly-based position sizing, risk mgmt | Active |
-| Causal-Ensemble    | `causal_ensemble.py`    | RANGING / SQUEEZE / VOLATILE | Mean reversion, causal lead-lag        | Active |
-| Liquidity-Sweep    | `liquidity_sweep.py`    | VOLATILE / TRENDING          | Stop-hunt detection, smart money       | Active |
+| # | Brain Name         | File                    | Regime Gate                          | Status         |
+|---|--------------------|-------------------------|--------------------------------------|----------------|
+| 1 | AMV-LSTM           | `amv_lstm.py`           | TRENDING_DOWN                        | Built + Tested |
+| 1b| AMV-LSTM-Uptrend   | `amv_lstm_uptrend.py`   | TRENDING_UP                          | Built + Tested |
+| 2 | Regime-Ensemble    | `regime_ensemble.py`    | ALL (meta — runs first, always)      | Built + Tested |
+| 3 | Multi-Modal-Fusion | `multi_modal_fusion.py` | RANGING, SQUEEZE                     | Built + Tested |
+| 4 | Multi-Timeframe    | `multi_timeframe.py`    | TRENDING_UP, TRENDING_DOWN           | Built + Tested |
+| 5 | Cross-Stock-GNN    | `cross_stock_gnn.py`    | VOLATILE, RANGING                    | Built + Tested |
+| 6 | Causal-Ensemble    | `causal_ensemble.py`    | RANGING, SQUEEZE, VOLATILE           | Built + Tested |
+| 7 | Liquidity-Sweep    | `liquidity_sweep.py`    | VOLATILE, TRENDING_UP, TRENDING_DOWN | Built + Tested |
+| 8 | RL-Weighter        | `rl_weighter.py`        | ALL (sizer, not voter)               | Built + Tested |
 
-**Regime-Ensemble is the meta brain** — it overrides the external regime signal.
-Every other brain must respect the regime gate before producing a directional
-signal.
+**Regime-Ensemble runs first and sets the regime for all other brains.**
+**RL-Weighter is a position sizer — it goes into `brain_results[]`, NOT `signals[]`.**
 
 ---
 
-## 3. CORE ARCHITECTURE RULES (Never Break These)
+## 3. CORE RULES (Never Break These)
 
-### 3.1 The BrainSignal Contract
-
-Every brain **must** return a `BrainSignal` from `brain_contract.py`. No plain
-dicts. No custom objects.
+### 3.1 BrainSignal Contract
+Every brain returns a `BrainSignal` from `brain_contract.py`. No plain dicts. No exceptions.
 
 ```python
 from market_agent.brain.brain_contract import BrainSignal
 ```
 
-Required fields every brain must populate honestly:
+Required fields: `direction` (BUY/SELL/HOLD), `confidence` (0.0–1.0), `signal_strength`,
+`primary_evidence`, `supporting_factors`, `contra_factors`, `reliability_flags`, `measurements`.
 
-- `direction`: `'BUY'`, `'SELL'`, or `'HOLD'`
-- `confidence`: `0.0–1.0` — **must be earned, not assigned**
-- `signal_strength`: `0.0–1.0` — magnitude, not direction
-- `primary_evidence`: single most important reason, in plain English
-- `supporting_factors`: list of strings — what agrees with this signal
-- `contra_factors`: list of strings — what argues AGAINST this signal
-- `reliability_flags`: dict of booleans — raise flags when something is wrong
-- `measurements`: dict of key numeric values (for the Boss Brain to inspect)
+### 3.2 Confidence Caps (Earned, Never Assumed)
+| Signal source | Cap |
+|---|---|
+| SMA-only crossover | 0.68 |
+| RSI-only | 0.65 |
+| Rule-based, no model | 0.70 |
+| Multi-factor, no ML | 0.82 |
+| ML model with proven backtest | 0.95 |
 
-### 3.2 Confidence is Earned, Never Assumed
+**Falsely high confidence causes real financial loss. If no model backs it, cap it.**
 
-- **Never assign `confidence=0.95` unless a real model with real validation data
-  backs it**
-- SMA-only signals → cap at `0.68` (as enforced in `amv_lstm.py`)
-- RSI-only signals → cap at `0.65`
-- Rule-based signals with no model → cap at `0.70`
-- Reserve `0.85+` for real ML models with proven backtest accuracy
-- The cap exists because **overconfidence kills accounts**
+### 3.3 Regime Gate is Mandatory
+Every brain checks regime before firing a directional signal. Wrong regime → `direction='HOLD'`.
+The gate list is in `signal_generators.py` as `BRAIN_REGIME_GATES_UNIFIED`. Do not duplicate it.
 
-### 3.3 The Regime Gate is Mandatory
-
-Before any brain produces a directional signal, the current regime must allow
-it:
-
-```python
-BRAIN_REGIME_GATES_UNIFIED = {
-    'AMV-LSTM':           ['TRENDING_UP', 'TRENDING_DOWN'],
-    'Multi-Modal-Fusion': ['RANGING', 'SQUEEZE'],
-    'Multi-Timeframe':    ['TRENDING_UP', 'TRENDING_DOWN'],
-    'Cross-Stock-GNN':    ['VOLATILE', 'RANGING'],
-    'Causal-Ensemble':    ['RANGING', 'SQUEEZE', 'VOLATILE'],
-    'RL-Weighter':        ['TRENDING_UP', 'TRENDING_DOWN', 'RANGING'],
-    'Liquidity-Sweep':    ['VOLATILE', 'TRENDING_UP', 'TRENDING_DOWN'],
-    'Regime-Ensemble':    ['ALL'],
-}
+### 3.4 Valid Regimes Only
 ```
+TRENDING_UP    TRENDING_DOWN    RANGING    VOLATILE    SQUEEZE    CHAOS
+```
+`HYBRID_SCAN`, `PATH_A`, `VOLATILE_CHAOS`, `STABLE_TRADING` — **all deprecated and invalid**.
+If you see them in code or data: fix immediately using `normalize_regime()` in `signal_generators.py`.
 
-If a brain is called in the wrong regime, it must return `direction='HOLD'` with
-low confidence. **Not a fallback signal. HOLD.**
-
-### 3.4 ATR is Canonical — Use `brain_utils`
-
+### 3.5 ATR is Canonical
 ```python
 from market_agent.brain.brain_utils import calc_atr
 atr = calc_atr(hist)
 ```
+Never compute ATR inline. Never use a different formula. Stop losses and targets depend on this.
 
-**Never compute ATR inline.** Never use a different formula per brain. The stop
-loss, T1, and T2 targets all depend on a consistent ATR.
-
-### 3.5 R:R Ratios Must Be Set Per Brain
-
-Each brain has its own R:R logic because they trade differently:
-
-- Trend-following brains (AMV-LSTM): tight SL = `rr_sl_mult=0.75`, wide T2 =
-  `rr_t2_mult=3.5`
-- Mean-reversion brains (Causal-Ensemble): wider SL, closer T1
-- These must be set as constants at the top of each brain file
+### 3.6 CHAOS = No Trades
+Every brain returns `direction='HOLD'` when regime is CHAOS. No exceptions.
 
 ---
 
-## 4. UNIFIED REGIME TAXONOMY (Use This Everywhere)
+## 4. PIPELINE ARCHITECTURE
 
 ```
-TRENDING_UP    — Strong uptrend. Trust trend brains 90%.
-TRENDING_DOWN  — Strong downtrend. Trust trend brains 90%.
-RANGING        — Sideways. Trust mean-reversion 90%.
-VOLATILE       — High volatility. Trust volatility brains 85%.
-SQUEEZE        — Bollinger/ATR squeeze. Breakout imminent.
-CHAOS          — DO NOT TRADE. All brains output HOLD.
+Data (AngelOne / yfinance fallback)
+  → validate_ohlcv()
+  → Regime-Ensemble brain  →  regime string
+  → signal_generators.py   →  List[BrainSignal]   (regime-gated, per brain)
+  → cortex.py              →  CouncilVerdict       (weighted vote)
+  → circuit_breaker check
+  → paper_trader           →  open/close positions
+  → signal_resolver        →  resolve outcomes → brain_predictions table
+  → health_monitor         →  per-brain accuracy tracking
 ```
 
-Old regime names are DEPRECATED. Migration map in `signal_generators.py`. If you
-see `STABLE_TRADING`, `HYBRID_SCAN`, etc. in code — fix it immediately using
-`normalize_regime()`.
+**Key files:**
+| File | Purpose |
+|---|---|
+| `brain/signal_generators.py` | Coordinator: calls all brains, applies gates, builds signal dicts |
+| `brain/cortex.py` | Boss Brain: weighted voting, CouncilVerdict |
+| `brain/health_monitor.py` | Per-brain accuracy tracking from DB |
+| `brain/brain_contract.py` | BrainSignal dataclass — the contract |
+| `brain/brain_utils.py` | Canonical ATR, RSI, MACD, swing levels |
+| `runner/watchlist_scanner.py` | Main loop: data → pipeline → resolve → learn |
+| `runner/autonomous_scout.py` | 10-minute scan scheduler |
+| `learning/signal_resolver.py` | Stores predictions, resolves outcomes |
+| `data/storage/postgres.py` | Single ORM source of truth |
+| `task.md` | **Current active tasks — always check first** |
 
 ---
 
-## 5. HOW TO WORK ON A BRAIN (Step-by-Step Protocol)
+## 5. DATABASE STATE (as of 2026-03-31)
 
-> Follow this for every brain improvement, no exceptions.
+| Table | Rows | Notes |
+|---|---|---|
+| `signal_predictions` | 473 | All from old pipeline (invalid regimes). Noisy but resolvable. |
+| `brain_predictions` | 0 | Schema ready. New pipeline has never written here yet. |
+| `council_verdicts` | 0 | Schema ready. |
+| `paper_trade_signals` | 0 | Schema ready. |
 
-### Step 1: Read Before You Write
-
-1. Read `task.md` — understand which phase and which brain you are on
-2. Read `EachBrain.md` — understand the specific brain's purpose and known
-   issues
-3. Read the brain's own file completely
-4. Read `brain_contract.py` — understand what the output must look like
-5. Read `signal_generators.py` — understand how this brain is called and gated
-6. Read the brain's test file if it exists (e.g. `test_brain_01_regime.py`)
-
-### Step 2: Understand Why It Was Losing
-
-Before writing a single line of code, answer these questions:
-
-- What regime was it trading in when it lost?
-- Was the confidence falsely high?
-- Was the signal stale?
-- Was there no contra-factor being raised?
-- Was the HOLD condition too permissive?
-- Was there a data quality issue (gaps, bad OHLCV)?
-
-**Document your hypothesis. Don't just fix. Understand.**
-
-### Step 3: Make the Change
-
-- Change only what is needed — surgical, not cosmetic
-- Do not refactor while fixing — one concern at a time
-- Do not rename things unless they are genuinely wrong
-- Check the full file after every change — top to bottom
-- Look for: hardcoded values that should be constants, missing error handling,
-  silent failures, confidence values that were assumed rather than computed
-
-### Step 4: Write or Update Tests
-
-- Every brain must have a test file: `test_brain_XX_brainname.py`
-- Tests must check: correct regime gating, confidence caps, HOLD conditions,
-  flag raising
-- Tests must use real-looking synthetic data — not random noise
-- Tests must all pass before declaring a brain "improved"
-
-### Step 5: Backtest Before Claiming Win Rate
-
-- Do not claim a % win rate without running a proper backtest
-- Use at least 3 months of data
-- Test across multiple regimes
-- Report: win rate, avg profit per winning trade, avg loss per losing trade, max
-  drawdown
-- If backtest data is unavailable, say so. Do not estimate.
+**The new 8-brain pipeline is built and tested but not yet connected to production.**
+The primary blocker is that `USE_PATH_A_SEVEN_BRAINS` defaults to `false` and Path A
+passes `regime="PATH_A"` (invalid) when enabled.
 
 ---
 
-## 6. DATA SOURCES — WHAT IS LEGITIMATE
+## 6. CURRENT PHASE: PIPELINE CONNECTION
 
-Only use data from these sources. **No assumptions. No fabricated data. No
-yfinance for production.**
+**Phases completed:**
+- Phase 0: Pre-test fixes (regime names, BrainSignal contract violations)
+- Phase 2: All 8 brain unit tests passing (9 test files, 40+ test cases)
+- Phase A: Logic improvements A1–A12 all complete
+- Phase B: B1–B9 all complete
 
-| Data Type              | Source                                                      | Notes                             |
-| ---------------------- | ----------------------------------------------------------- | --------------------------------- |
-| OHLCV Intraday (India) | NSE official data / Zerodha Kite API                        | 1m, 5m, 15m, 1h                   |
-| OHLCV Daily            | NSE / BSE / Zerodha                                         | EOD data                          |
-| Macro/FII/DII          | NSE India website                                           | Institutional flow data           |
-| Options chain          | NSE / Sensibull                                             | For PCR, max pain                 |
-| News/Sentiment         | Economic Times, Moneycontrol, Reuters                       | Use structured APIs, not scraping |
-| Global markets         | Yahoo Finance (acceptable for non-production research only) | SPX, DXY, VIX correlations        |
-| Crypto (if used)       | Binance official API                                        | Funding rates, OI                 |
+**Current goal:** Wire the new brain pipeline to production so `brain_predictions`,
+`council_verdicts`, and `paper_trade_signals` start accumulating real data.
 
-**If data is missing or stale → raise a `reliability_flag`. Do not interpolate
-silently.**
+**Next gate:** Phase C (backtest + parameter tuning) cannot start until:
+- [ ] `brain_predictions` has at least 30 signals per brain per regime
+- [ ] Signal resolver is resolving outcomes against real price data
+- [ ] `paper_trade_signals` is tracking open/closed positions
 
 ---
 
-## 7. WHAT THE BOSS BRAIN (cortex.py) EXPECTS
+## 7. HOW TO WORK ON A TASK
 
-The Boss Brain reads all `BrainSignal` objects and makes the final decision. It
-weights each brain by:
-
-1. `regime_suitability` — is this brain right for the current regime?
-2. `method_confidence` — how reliable is this brain's approach in general?
-3. `recent_accuracy` — what has this brain's live win rate been?
-4. `reliability_flags` — any flags raised discounts the brain's vote
-
-The Boss Brain is NOT magic. It is only as good as the signals it receives. **If
-a brain lies (overconfident, stale signal, wrong direction) — the Boss Brain
-will make a bad trade.**
+1. Read `task.md` first — understand exactly what phase/task you are on
+2. Read the relevant brain file(s) and any referenced test file
+3. Understand why the current state is what it is before changing it
+4. Make surgical changes — one concern at a time
+5. Run the relevant test file after any change: `pytest tests/test_brain_XX.py -v`
+6. If a test breaks, fix it before moving on — never leave tests failing
+7. Update `task.md` when a task is complete
 
 ---
 
-## 8. THE AEP SYSTEM (AI Enhancement Proposals)
+## 8. WHAT NEVER TO DO
 
-The AEP system is **monitoring only** — it collects observations and suggests
-parameter changes. It does NOT auto-apply any code changes.
-
-Files: `aep_trigger.py`, `aep_storage.py`, `aep_council_vote.py`,
-`aep_generator.py`, `aep_reviewer.py`
-
-**DISABLED (do not re-enable without explicit instruction):**
-
-- `code_reviewer.py` — AI-generated code drafting
-- `pr_system.py` — Auto-merge pipeline
-
-These were disabled intentionally. Auto-merging AI code into a live trading
-system without sandboxing is dangerous.
+- ❌ Pass `regime="PATH_A"` or `regime="HYBRID_SCAN"` or any deprecated regime string
+- ❌ Assign `confidence=0.95` without a real ML model backing it
+- ❌ Return BUY/SELL from a brain that failed data quality checks
+- ❌ Remove `contra_factors` to make a signal look cleaner
+- ❌ Use `sleep()` or blocking waits inside brain signal functions
+- ❌ Catch all exceptions silently (`except: pass`) — always log them
+- ❌ Enable `pr_system.py` or `code_reviewer.py` — both disabled intentionally
+- ❌ Trade in CHAOS regime
+- ❌ Touch multiple brains in one session unless explicitly instructed
+- ❌ Claim a brain is "fixed" without running its test file
 
 ---
 
-## 9. HARDCODING RULES
+## 9. TESTING
 
-**Never hardcode these** (use config files, DB, or constants at module top):
-
-- Symbol names inside logic
-- Date ranges inside logic
-- Win rate percentages as static floats
-- Confidence values that should be computed
-- Broker API keys or credentials
-
-**Acceptable constants at module top** (not hardcoded inside functions):
-
-- R:R multipliers (they are design decisions, not magic numbers)
-- Confidence caps (they are design decisions, documented with rationale)
-- Regime gate lists (they are architecture decisions)
-
-Every constant must have a comment explaining WHY it is that value.
-
----
-
-## 10. INTRADAY FOCUS — CURRENT MISSION
-
-We are focused on **intraday trading (scalping + swing intraday)**:
-
-- Timeframes: 5m, 15m, 1h primarily
-- Session: Indian market hours (9:15 AM – 3:30 PM IST)
-- No overnight positions (unless explicitly approved)
-- Target: 1–3 quality trades per day per symbol
-- Preference: quality over quantity — 3 high-confidence trades beats 10 guesses
-
-Long-term / positional trading is a future mission. Do not build for it now.
-
----
-
-## 11. COMMUNICATION RULES FOR THE AGENT
-
-When working on any task in this codebase, the agent must:
-
-1. **Never assume** — if something is unclear, ask. Provide your hypothesis, but
-   mark it as a hypothesis.
-2. **Show proof** — if you say a brain had a 60% win rate, show the data. If you
-   say a formula is wrong, show why mathematically.
-3. **Disagree when right** — if what the user is asking for would make the
-   system worse, say so clearly and explain why. Agreeing with everything is how
-   trading systems lose money.
-4. **One brain at a time** — do not touch multiple brains in a single session
-   unless explicitly instructed.
-5. **Report the full file state** — after any code change, confirm the entire
-   file is consistent: no gaps, no stale imports, no orphaned functions, no
-   hardcoded values that should be configurable.
-6. **Flag deprecated code** — if you see old regime names, old patterns, or
-   deprecated imports, flag them. Do not silently leave them.
-7. **Document your changes** — every change to a brain file must include an
-   inline comment explaining what changed and why. Future developers (and future
-   AI agents) must understand the reasoning.
-
----
-
-## 12. PHASES OF WORK
-
-> `task.md` contains the current active phase. Always check it first.
-
-| Phase   | Description                                                        |
-| ------- | ------------------------------------------------------------------ |
-| Phase A | Architecture cleanup — contracts, regime taxonomy, ATR unification |
-| Phase B | Brain health monitoring — AEP data collection, accuracy tracking   |
-| Phase C | Brain improvement — fix each brain's logic, confidence, gates      |
-| Phase D | Backtesting — validate each brain against historical data          |
-| Phase E | Live paper trading — observe, measure, compare                     |
-| Phase F | Live trading — real capital, tight risk controls                   |
-
-**We are currently in Phase C.** Focus is on improving each brain's core logic
-so it does not generate false signals, overconfident positions, or trade in
-wrong regimes.
-
----
-
-## 13. DEFINITION OF "IMPROVED BRAIN"
-
-A brain is considered improved when ALL of the following are true:
-
-- [ ] It correctly returns `HOLD` in regimes it should not trade
-- [ ] Its confidence is computed from evidence, not assigned
-- [ ] Its `contra_factors` are honest and populated
-- [ ] Its `reliability_flags` are raised when data quality is poor
-- [ ] It has a test file with passing tests
-- [ ] Its backtest shows a win rate above 52% with positive expected value
-- [ ] It has been reviewed by a human before merging
-
-Until all boxes are checked, the brain is still being improved.
-
----
-
-## 14. WHAT COUNTS AS A "WIN"
-
-For intraday:
-
-- **Win**: Trade closes at or beyond T1 before hitting SL
-- **Partial win**: Trade closes between entry and T1 (e.g. manual exit)
-- **Loss**: Trade hits SL
-- **Breakeven**: Trade exits at entry ±0.1%
-
-Expected value formula:
-
-```
-EV = (Win Rate × Avg Profit) − (Loss Rate × Avg Loss)
-EV must be POSITIVE across at least 50 trades before a brain is trusted
+Every brain has a test file in `tests/`. Run tests with:
+```bash
+cd "d:/AI Agent Finance"
+pytest tests/ -v                          # all tests
+pytest tests/test_brain_02_amv_lstm.py -v # specific brain
 ```
 
----
-
-## 15. NEVER DO THESE THINGS
-
-- ❌ Never use `sleep()` or blocking waits inside brain signal functions
-- ❌ Never catch all exceptions silently (`except: pass`) — always log them
-- ❌ Never return a BUY/SELL from a brain that has failed data quality checks
-- ❌ Never remove `contra_factors` to make a signal look cleaner
-- ❌ Never claim a brain is "fixed" without running tests
-- ❌ Never enable the auto-code-merge pipeline (`pr_system.py`) without human
-  approval
-- ❌ Never trade in `CHAOS` regime — every brain must return `HOLD` in CHAOS
+All 9 test files must pass before any production change.
 
 ---
 
-## 16. FILE MAP (Quick Reference)
+## 10. DATA SOURCES (Legitimate Only)
 
-| File                     | Purpose                                                       |
-| ------------------------ | ------------------------------------------------------------- |
-| `brain_contract.py`      | The `BrainSignal` dataclass — THE contract                    |
-| `brain_utils.py`         | Shared utilities (ATR, signal dict builder, etc.)             |
-| `signal_generators.py`   | Calls all brains, applies regime gates, delta filters         |
-| `cortex.py`              | Boss Brain — reads all BrainSignals, makes final decision     |
-| `health_monitor.py`      | Tracks per-brain accuracy by regime from real DB data         |
-| `boss_prompt_builder.py` | Builds the council prompt for the Boss Brain LLM              |
-| `regime_ensemble.py`     | Brain 2 — detects and outputs the current market regime       |
-| `aep_storage.py`         | Reads signal_predictions table, writes ai_code_proposals      |
-| `council_memory.py`      | Stores council debate history                                 |
-| `brain_logger.py`        | Structured logging for all brain activity                     |
-| `task.md`                | CURRENT TASK — always read this first                         |
-| `EachBrain.md`           | Detailed description of each brain's purpose and known issues |
+**Corrected 2026-09-13 — this table previously described the intended design,**
+**not the actual wiring. Verified against the live code, not assumed.**
+
+| Data type | Source | Notes |
+|---|---|---|
+| OHLCV Historical (India, all timeframes) | Breeze API (ICICI Direct) → yfinance fallback | `market_agent/scripts/rebuild_db.py`. Breeze caps at ~1000 candles/call (no pagination) — falls back to yfinance automatically when the requested period exceeds that. |
+| OHLCV Live quotes (India) | AngelOne SmartAPI | `angel_one_client.py` — live/intraday quotes only, **not** used for historical backfill despite what this table previously claimed. |
+| OHLCV Historical (US equities, commodities, forex) | Yahoo Finance (yfinance) | Primary, not just "research only" — this is the actual production source for these asset classes. |
+| OHLCV Historical (Crypto) | Binance public data mirror (`data-api.binance.vision`) → yfinance fallback | OHLCV only. Funding rate / open interest ingestion is **not built** — do not assume it exists when working on cascade/liquidation-risk features. |
+| Macro / FII / DII | `nsepython` via `signal_generators.get_fii_dii_signal()` | Real, live source; honestly falls back to HOLD/0.0 confidence on failure. `institutional_flow.py` (a dead file that faked this data with `np.random`) has been deleted — it was never wired into anything live. |
+
+If data is missing or stale → raise a `reliability_flag`. Do not interpolate silently.
 
 ---
 
-_Last updated: Phase C — Brain-by-brain improvement cycle_ _Primary focus:
-Intraday trading, Indian equities_ _Rule: One brain at a time. Prove it works.
-Move on._
+## 11. AEP SYSTEM (Monitoring Only)
+
+AEP collects observations and suggests parameter changes. It does NOT auto-apply code changes.
+
+Files: `aep_trigger.py`, `aep_storage.py`, `aep_council_vote.py`, `aep_generator.py`, `aep_reviewer.py`
+
+**Disabled (do not re-enable without explicit instruction):**
+- `code_reviewer.py` — AI code drafting
+- `pr_system.py` — auto-merge pipeline
+
+---
+
+_Last updated: 2026-03-31 — Pipeline connection phase_
+_Primary focus: Indian equities intraday, 5m/15m/1h timeframes_
+_Rule: Understand before changing. Test before claiming done._

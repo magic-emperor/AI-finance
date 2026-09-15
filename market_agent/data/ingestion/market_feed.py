@@ -33,14 +33,14 @@ class MarketFeed:
                 # For now, we just insert.
                 
                 ohlc = {
-                    "open": float(row['Open']),
-                    "high": float(row['High']),
-                    "low": float(row['Low']),
-                    "close": float(row['Close']),
-                    "volume": int(row['Volume'])
+                    "Open": float(row['Open']),
+                    "High": float(row['High']),
+                    "Low": float(row['Low']),
+                    "Close": float(row['Close']),
+                    "Volume": int(row['Volume'])
                 }
-                
-                self.storage.store_ohlc(symbol, dt, interval, ohlc)
+
+                self.storage.store_ohlc(symbol, dt, interval, ohlc, source='yfinance')
                 count += 1
             
             logger.info("ingestion_complete", symbol=symbol, records=count)

@@ -10,6 +10,38 @@ from dotenv import load_dotenv
 
 logger = structlog.get_logger()
 
+# Breeze/ICICI uses its own internal "isec_stock_code" per symbol, which
+# frequently does NOT match the plain NSE ticker (confirmed via breeze.get_names()
+# for the current watchlist - only ITC happens to match its own ticker). Passing
+# the raw ticker as stock_code does not error - it returns Status=200 with an
+# empty Success list, so this was silently falling back to yfinance for 7 of 8
+# NSE stocks with no indication anything was wrong. Map explicitly instead of
+# guessing from the ticker string.
+NSE_ISEC_CODE_MAP = {
+    'ITC':         'ITC',
+    'HDFCBANK':    'HDFBAN',
+    'RELIANCE':    'RELIND',
+    'TATASTEEL':   'TATSTE',
+    'LT':          'LARTOU',
+    'M&M':         'MAHMAH',
+    'ADANIENT':    'ADAENT',
+    'ADANIPORTS':  'ADAPOR',
+    'NSEI':        'NIFTY',    # ^NSEI (Nifty 50)
+    'NSEBANK':     'CNXBAN',   # ^NSEBANK (Nifty Bank)
+}
+
+
+def _to_isec_code(symbol: str) -> str:
+    """
+    Map an NSE ticker (e.g. 'RELIANCE.NS', '^NSEBANK') to Breeze's internal
+    isec_stock_code (e.g. 'RELIND'). Falls back to the naive strip-and-upper
+    transform for any symbol not in the explicit map, so an unmapped new
+    watchlist addition still gets a best-effort attempt rather than crashing -
+    but it will likely return empty from Breeze until added here explicitly.
+    """
+    clean = symbol.replace('.NS', '').replace('^', '').upper()
+    return NSE_ISEC_CODE_MAP.get(clean, clean)
+
 
 class BreezeClient:
     """
@@ -82,7 +114,7 @@ class BreezeClient:
         if not self._ensure_connected():
             return None
         try:
-            clean = symbol.replace('.NS', '').replace('^', '').upper()
+            clean = _to_isec_code(symbol)
             res   = self.breeze.get_quotes(
                 stock_code=clean, exchange_code='NSE',
                 expiry_date='', product_type='cash',
@@ -125,7 +157,7 @@ class BreezeClient:
                 interval=interval,
                 from_date=from_date,
                 to_date=to_date,
-                stock_code=symbol.replace('.NS', '').upper(),
+                stock_code=_to_isec_code(symbol),
                 exchange_code='NSE',
                 product_type='cash',
             )

@@ -14,7 +14,7 @@ import pandas as pd
 import yfinance as yf
 from datetime import datetime
 import structlog
-from market_agent.models.causal_ensemble import GrangerCausalityAnalyzer
+from market_agent.models.causal_rl_models import GrangerCausalityAnalyzer
 
 # Training symbols from train_all_brains.py or define here
 TRAINING_SYMBOLS = [

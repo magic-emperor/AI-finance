@@ -1057,7 +1057,7 @@ def run_watchlist_scan():
         from market_agent.config import NEURAL_MODELS, MODELS_DIR
         from market_agent.models.micro_price_nn import MicroPriceNN
         from market_agent.models.preprocessing import DataPreprocessor
-        from market_agent.models.causal_ensemble import RLEnsembleWeighter
+        from market_agent.models.causal_rl_models import RLEnsembleWeighter
         import torch
         import os
         import json
