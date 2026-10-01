@@ -37,6 +37,10 @@ Rules for changing your method (all must hold):
 - You may change HOW YOU PREDICT. You may never change how you are graded: the grader, schema, ledger format, validator and scouts are off-limits, and earlier ledger lines are never edited.
 - A single wrong call is never enough. A 60%-accurate method is wrong 40% of the time by design.
 
+## 3b. Daily market view — first run of each UTC day only (same condition as step 3)
+Form a view on: Nifty 50 (`^NSEI`), Bank Nifty (`^NSEBANK`), rupee (`USDINR=X`; UP = rupee weakens), `EURUSD=X`, gold (`GC=F`), crude (`CL=F`), each over the next 5 trading days. Base it on evidence you open this run: price action (yfinance), RBI/SEBI/PIB releases, FPI flows, the global calendar, crude and US yields. For each: UP, DOWN, or NO VIEW, with a probability and a one-line reason.
+Any UP/DOWN view with probability >= 0.55 MUST be recorded as a real call in step 5 (horizon 5, signal_family `policy_macro` or `fx_macro`), so your market opinions are graded like everything else. NO VIEW is a legitimate answer; never manufacture conviction.
+
 ## 4. Investigate each escalated name
 For each name in the payload (up to 10), run specialist subagents IN PARALLEL with the Agent tool. Give each a self-contained brief with the symbol, the flags, and the evidence URLs:
 - filings analyst: open the NSE filings cited; who bought, how much versus their holding, open market or not, any related disclosures in the last 30 days.
@@ -63,13 +67,26 @@ python -m intel.validate ../ledger/ledger
 Then mark every flag id from the `FLAG_IDS:` line you investigated (called or declined), from `../code`:
 `python -m intel.agent_queue --data ../data --consumed ../ledger/agent/consumed.jsonl --mark <id> <id> ...`
 If validation fails, fix only lines you added in this run; if you cannot, `git -C ../ledger checkout -- ledger` and record a FAILED run instead.
-Optionally write `findings/YYYY/MM/DD/HHMM.md` with your full reasoning (never graded).
+ALWAYS write `findings/YYYY/MM/DD/HHMM.md` (UTC time) and overwrite `LATEST.md` at the ledger root with the same content, in this format:
 ```
-cd ../ledger && git add ledger ; git add agent ; git add findings
+# Agent report — <UTC timestamp> (playbook vN)
+## Market view (5 trading days)        <- only on runs that did step 3b
+| Market | View | Probability | Recorded as call? | Why |
+## Names investigated
+| Symbol | Signal | Verdict (CALL / NO CALL) | Direction | Horizon | Probability | Why |
+## Open calls (from the ledger, not yet graded)
+| Call id | Instrument | Direction | Horizon | Made at | Probability |
+## Recently graded (from ../data/scores/calls_scored.jsonl)
+| Call id | Instrument | Direction | Result (hit/miss) | Excess return |
+## Lessons / playbook changes
+```
+These files are for the human reader and are never graded; the ledger is the record.
+```
+cd ../ledger && git add ledger ; git add agent ; git add findings ; git add LATEST.md
 git commit -m "agent: <UTC timestamp> <n> call(s)"
 git push origin claude/agent-ledger   # on rejection: git pull --rebase origin claude/agent-ledger, retry up to 5 times
 ```
 Run each `git add` separately and ignore "did not match" errors for paths you did not create.
 
 ## 7. Report
-End with a short summary: names examined, calls made (instrument, direction, horizon, probability, one-line thesis), calls declined and why, any lessons or version change.
+End your reply with the same tables as `LATEST.md` (market view if any, names investigated, open calls, recently graded), then one short paragraph: what you think matters most right now and why. Plain language; the reader is the owner, not an engineer.
