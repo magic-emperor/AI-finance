@@ -1,0 +1,7 @@
+# Deps for the intel scouts + grader CI jobs. Deliberately NOT the repo-root requirements.txt
+# (torch, playwright, faiss-cpu... belong to the unrelated old market_agent stack).
+pandas>=2.0.0
+numpy>=1.24.0
+requests>=2.31.0
+feedparser>=6.0.0
+yfinance>=0.2.0

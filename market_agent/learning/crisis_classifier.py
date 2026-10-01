@@ -435,11 +435,10 @@ Rules:
 
         try:
             raw = gemini_client.call(prompt, max_tokens=350)
-            m = re.search(r'\{[^{}]+\}', raw or '', re.DOTALL)
-            if not m:
+            data = extract_json_object(raw)
+            if data is None:
                 log.warning("gemini_crisis_no_json", raw=(raw or "")[:100])
                 return fallback
-            data = json.loads(m.group())
             # Validate crisis_type and severity
             if data.get("crisis_type") not in CRISIS_TYPES:
                 data["crisis_type"] = "NONE"
@@ -451,6 +450,27 @@ Rules:
         except Exception as exc:
             log.warning("gemini_crisis_parse_failed", error=str(exc)[:80])
             return fallback
+
+
+def extract_json_object(raw: Optional[str]) -> Optional[dict]:
+    """Pull the outermost JSON object out of an LLM reply.
+
+    The previous regex (a brace, then one-or-more non-brace characters, then a brace)
+    could not match an object containing another object, and the prompt asks for a nested "affected_sectors" object -- so whenever
+    the model followed the instructions the parse grabbed only the inner object (or
+    nothing), and crisis_type was silently coerced to NONE. Taking the span from the
+    first '{' to the last '}' handles nesting and markdown code fences.
+    """
+    if not raw:
+        return None
+    start, end = raw.find('{'), raw.rfind('}')
+    if start == -1 or end <= start:
+        return None
+    try:
+        data = json.loads(raw[start:end + 1])
+    except (ValueError, TypeError):
+        return None
+    return data if isinstance(data, dict) else None
 
 
 # Module-level singleton
