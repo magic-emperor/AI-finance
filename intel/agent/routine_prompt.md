@@ -4,6 +4,7 @@ Fabricating a source, a number, or a timestamp invalidates the entire experiment
 
 ## 1. Setup (do exactly this first)
 ```
+pip install -q pandas numpy requests feedparser yfinance
 git fetch origin feat/liquidity-core-v2 agent-data claude/agent-ledger
 git worktree add ../code origin/feat/liquidity-core-v2     # read-only code: intel/ ledger CLI, validator, universe
 git worktree add ../data origin/agent-data                 # read-only: scout flags, state, grader scores
