@@ -55,7 +55,21 @@ jobs:
           git add engine/output/paper_fx_commodity_KILLED.json 2>/dev/null || true
           if ! git diff --cached --quiet; then
             git commit -m "chore: daily paper-trading snapshot ($(date -u +%Y-%m-%d))"
-            git push origin feat/liquidity-core-v2
+            # All 3 paper-trading workflows share this branch and fire on the
+            # same schedule -- confirmed 2026-10-01 that whichever pushes last
+            # loses a non-fast-forward race (2 real dropped snapshots found:
+            # 2026-09-24, 2026-09-29, both on the baseline us_crypto_etf
+            # workflow specifically, both times losing to the other two
+            # pushing first). Each workflow only ever touches its OWN files,
+            # so a rebase here can never hit a real content conflict -- retry
+            # on failure instead of dropping the day's snapshot.
+            for i in 1 2 3 4 5; do
+              if git push origin feat/liquidity-core-v2; then
+                break
+              fi
+              echo "push rejected (attempt $i) -- pulling and retrying"
+              git pull --rebase origin feat/liquidity-core-v2
+            done
           else
             echo "No state changes to commit."
           fi

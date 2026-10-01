@@ -42,7 +42,16 @@ jobs:
           git add engine/output/paper_us_crypto_etf_KILLED.json 2>/dev/null || true
           if ! git diff --cached --quiet; then
             git commit -m "chore: daily paper-trading snapshot ($(date -u +%Y-%m-%d))"
-            git push origin feat/liquidity-core-v2
+            # Retry on push race -- see paper_trade_fx_commodity.yml's comment
+            # for the full story (this exact workflow lost the race twice:
+            # 2026-09-24 and 2026-09-29, both dropped snapshots).
+            for i in 1 2 3 4 5; do
+              if git push origin feat/liquidity-core-v2; then
+                break
+              fi
+              echo "push rejected (attempt $i) -- pulling and retrying"
+              git pull --rebase origin feat/liquidity-core-v2
+            done
           else
             echo "No state changes to commit."
           fi
