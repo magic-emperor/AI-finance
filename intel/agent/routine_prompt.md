@@ -70,6 +70,8 @@ If validation fails, fix only lines you added in this run; if you cannot, `git -
 ALWAYS write `findings/YYYY/MM/DD/HHMM.md` (UTC time) and overwrite `LATEST.md` at the ledger root with the same content, in this format:
 ```
 # Agent report — <UTC timestamp> (playbook vN)
+## Coverage this run
+What the scouts watched (from the newest record in ../data/ledger/runs/: sources OK / total, flags raised, any failed source by name), how many names were in your queue, how many you investigated, how many markets you gave a view on, and how many calls you made.
 ## Market view (5 trading days)        <- only on runs that did step 3b
 | Market | View | Probability | Recorded as call? | Why |
 ## Names investigated
