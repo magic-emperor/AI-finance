@@ -1,0 +1,75 @@
+name: Agent grader
+
+# Deterministic, no LLM. Scores the prediction agent's calls (claude/agent-ledger) against real
+# prices and writes scores to agent-data/scores, which the agent reads to reflect on its mistakes.
+# The agent can change how it predicts; it can never change this.
+
+on:
+  schedule:
+    - cron: "41 14 * * 1-5"            # 20:11 IST, after the NSE close
+  workflow_dispatch: {}
+
+permissions:
+  contents: write
+
+concurrency:
+  group: agent-data-writer
+  cancel-in-progress: false
+
+jobs:
+  grade:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feat/liquidity-core-v2
+
+      - uses: actions/checkout@v4
+        with:
+          ref: agent-data
+          path: _agent_data
+
+      - uses: actions/checkout@v4
+        with:
+          ref: claude/agent-ledger
+          path: _ledger
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: intel/requirements.txt
+
+      - run: pip install -r intel/requirements.txt
+
+      - name: Validate the agent's ledger (integrity is reported, never silently skipped)
+        id: validate
+        continue-on-error: true
+        run: python -m intel.validate _ledger/ledger | tee _agent_data/ledger_validation.txt
+
+      - name: Grade
+        run: python -X utf8 -m intel.grader --ledger _ledger/ledger --out _agent_data/scores
+
+      - name: Commit and push
+        if: always()
+        working-directory: _agent_data
+        run: |
+          git config user.name "agent-grader-bot"
+          git config user.email "actions@users.noreply.github.com"
+          git add scores 2>/dev/null || true
+          git add ledger_validation.txt 2>/dev/null || true
+          if ! git diff --cached --quiet; then
+            git commit -m "grader: $(date -u +%Y-%m-%d)"
+            for i in 1 2 3 4 5; do
+              if git push origin HEAD:agent-data; then break; fi
+              echo "push rejected (attempt $i) -- rebasing and retrying"
+              git pull --rebase origin agent-data
+            done
+          else
+            echo "No score changes to commit."
+          fi
+
+      - name: Fail if the ledger failed validation
+        if: steps.validate.outcome == 'failure'
+        run: exit 1
