@@ -1,0 +1,68 @@
+{
+  "version": "grader_v2.0",
+  "comment": "Grader v2 (plan v2 §7). Every change here is a reviewed PR; the agent never edits this file.",
+
+  "horizons": [1, 5, 20],
+  "primary_horizon": 5,
+  "entry_rule": "Close of the decision day if decided before entry_cutoff_ist on a trading day, else the next trading day's close. Exit = close h trading days after entry.",
+  "entry_cutoff_ist": "15:00",
+  "price_source": "yahoo_adjusted (auto_adjust=True). Owner decision 2026-10-02: bhavcopy + corporate-action adjuster and sector benchmarks move to Phase 3.",
+  "equity_benchmark": "^NSEI",
+
+  "costs": {
+    "comment": "NSE cash delivery, from docs/plans/stats_reference.py (researched 2026-10-01). Applied to .NS instruments only; indices, FX and commodities carry no cost model yet and are reported gross.",
+    "notional_inr": 100000,
+    "stt_buy": 0.001,
+    "stt_sell": 0.001,
+    "stamp_buy": 0.00015,
+    "exch_txn": 0.0000307,
+    "sebi_fee": 0.000001,
+    "gst": 0.18,
+    "brokerage_per_side_inr": 0.0,
+    "dp_charge_inr": 20.0,
+    "slippage_one_way": {"large": 0.0005, "mid": 0.0015, "small": 0.0030}
+  },
+  "liquidity_buckets_cr": {
+    "comment": "20-day median daily turnover (Close x Volume) before entry, in Rs crore. Unknown turnover is costed as small (conservative).",
+    "large_min": 100,
+    "mid_min": 10
+  },
+
+  "b0_default_direction": {
+    "comment": "B0 = take every flag in its kind's default direction. null = graded but left out of B0 (owner decision Q5, 2026-10-02). 'hint' = the flag's own direction_hint. 'typed_announcement' = typed_announcement_directions, only while that table is active.",
+    "sast_acquisition": "UP",
+    "bulk_deal_buy": "UP",
+    "block_deal_buy": "UP",
+    "volume_breakout": "hint",
+    "announcement": "typed_announcement",
+    "news_multi_source": null,
+    "volume_spurt_notice": null,
+    "macro_move": null,
+    "regulator_release": null
+  },
+  "typed_announcement_directions": {
+    "active": false,
+    "status": "PROPOSED 2026-10-02, awaiting owner approval. Keys are NSE announcement categories (flag extra.desc) the scouts currently flag.",
+    "table": {
+      "Bagging/Receiving of orders/contracts": "UP",
+      "Action(s) taken or orders passed": null,
+      "Acquisition": null,
+      "Disclosure under SEBI Takeover Regulations": null
+    },
+    "notes": {
+      "Action(s) taken or orders passed": "Covers both regulatory penalties and favourable court/tribunal orders; no honest default.",
+      "Acquisition": "Acquirer-side reaction is mixed in the literature; no honest default.",
+      "Disclosure under SEBI Takeover Regulations": "Mostly the company forwarding holder disclosures already flagged via SAST; would double-count.",
+      "not_yet_scouted": "Auditor resignation (proposed default DOWN) is not an announcement category the scouts flag today; adding it is a scout change."
+    }
+  },
+
+  "excluded_calls": [
+    {
+      "call_id": "agent-20261002T034124Z-001",
+      "reason": "forced by the old step 3b (any market view with p >= 0.55 had to be recorded as a call); not the agent's judgment",
+      "decided": "owner, 2026-10-02 (phase0-discovery Q4)",
+      "as_macro_view": {"instrument": "USDINR=X", "p_up": 0.56}
+    }
+  ]
+}

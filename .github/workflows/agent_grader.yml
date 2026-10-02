@@ -49,7 +49,14 @@ jobs:
         run: python -m intel.validate _ledger/ledger | tee _agent_data/ledger_validation.txt
 
       - name: Grade
-        run: python -X utf8 -m intel.grader --ledger _ledger/ledger --out _agent_data/scores
+        # The commands live on the code branch (intel/ci/agent_grade.sh: v1 + v2 in shadow), so
+        # grader changes don't need a main-branch PR. Fallback = v1 alone, for code without it.
+        run: |
+          if [ -f intel/ci/agent_grade.sh ]; then
+            bash intel/ci/agent_grade.sh _ledger _agent_data
+          else
+            python -X utf8 -m intel.grader --ledger _ledger/ledger --out _agent_data/scores
+          fi
 
       - name: Commit and push
         if: always()
@@ -58,6 +65,7 @@ jobs:
           git config user.name "agent-grader-bot"
           git config user.email "actions@users.noreply.github.com"
           git add scores 2>/dev/null || true
+          git add stats 2>/dev/null || true
           git add ledger_validation.txt 2>/dev/null || true
           if ! git diff --cached --quiet; then
             git commit -m "grader: $(date -u +%Y-%m-%d)"

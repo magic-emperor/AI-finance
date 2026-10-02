@@ -302,6 +302,8 @@ def patched(monkeypatch):
 
 def test_unconfigured_fire_queues_and_says_so_without_pretending(tmp_path, patched, capsys):
     assert run_scouts.main(["--data-dir", str(tmp_path)]) == 0
+    (archived,) = [json.loads(l) for p in (tmp_path / "archive" / "flags").glob("*.jsonl") for l in p.read_text().splitlines()]
+    assert archived["seen_at"] >= archived["observed_at"]          # grader v2 enters no earlier than this
     state = json.loads((tmp_path / "state" / "scout_state.json").read_text())
     assert state["escalated"] == {} and len(state["pending"]) == 1
     run = read_records(str(tmp_path / "ledger"), "runs")[-1]
