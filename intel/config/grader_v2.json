@@ -37,12 +37,12 @@
     "announcement": "typed_announcement",
     "news_multi_source": null,
     "volume_spurt_notice": null,
-    "macro_move": null,
+    "macro_move": "hint",
     "regulator_release": null
   },
   "typed_announcement_directions": {
-    "active": false,
-    "status": "PROPOSED 2026-10-02, awaiting owner approval. Keys are NSE announcement categories (flag extra.desc) the scouts currently flag.",
+    "active": true,
+    "status": "APPROVED by the owner 2026-10-02 as proposed. Keys are NSE announcement categories (flag extra.desc) the scouts currently flag.",
     "table": {
       "Bagging/Receiving of orders/contracts": "UP",
       "Action(s) taken or orders passed": null,

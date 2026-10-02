@@ -199,6 +199,15 @@ def test_two_sigma_fx_move_is_flagged_quiet_one_is_not():
     assert [f["symbol"] for f in flags] == ["USDINR=X"]
 
 
+def test_macro_move_hint_is_the_sign_of_z():
+    quiet = [100 + 0.1 * (i % 3) for i in range(30)]
+    up = quiet[:-1] + [quiet[-2] * 1.03]
+    down = quiet[:-1] + [quiet[-2] * 0.97]
+    by = {f["symbol"]: f for f in macro.move_flags({"USDINR=X": up, "EURUSD=X": down}, "2026-10-01")}
+    assert by["USDINR=X"]["extra"]["z"] > 0 and by["USDINR=X"]["direction_hint"] == "UP"
+    assert by["EURUSD=X"]["extra"]["z"] < 0 and by["EURUSD=X"]["direction_hint"] == "DOWN"
+
+
 def test_only_recent_regulator_releases_are_flagged():
     items = [{"title": "RBI repo rate", "link": "https://rbi/1", "publisher": "RBI",
               "published_at": (NOW - timedelta(hours=2)).strftime("%Y-%m-%dT%H:%M:%SZ")},

@@ -146,12 +146,21 @@ def test_volume_breakout_follows_the_breakout_day_and_news_is_graded_but_not_in_
     assert f2["status"] == "GRADED" and f2["b0_direction"] is None and "b0_net" not in f2["horizons"]["5"]
 
 
-def test_untyped_announcements_stay_out_of_b0_until_the_table_is_approved():
+def test_typed_announcements_follow_the_approved_table():
     ann = _flag("a", "announcement", "AAA", "2026-10-12T05:00:00Z", desc="Bagging/Receiving of orders/contracts")
-    assert g2.b0_direction(ann, CFG) is None                                 # table inactive
-    active = dict(CFG, typed_announcement_directions=dict(CFG["typed_announcement_directions"], active=True))
-    assert g2.b0_direction(ann, active) == "UP"
-    assert g2.b0_direction(dict(ann, extra={"desc": "Acquisition"}), active) is None
+    assert CFG["typed_announcement_directions"]["active"] is True            # owner approval 2026-10-02
+    assert g2.b0_direction(ann, CFG) == "UP"
+    assert g2.b0_direction(dict(ann, extra={"desc": "Acquisition"}), CFG) is None        # ambiguous: out
+    assert g2.b0_direction(dict(ann, extra={"desc": "Board meeting"}), CFG) is None      # untyped: out
+    off = dict(CFG, typed_announcement_directions=dict(CFG["typed_announcement_directions"], active=False))
+    assert g2.b0_direction(ann, off) is None
+
+
+def test_macro_move_follows_its_hint_in_b0():
+    mv = dict(_flag("m", "macro_move", None, "2026-10-12T05:00:00Z"), symbol="USDINR=X", instrument="USDINR=X")
+    assert CFG["b0_default_direction"]["macro_move"] == "hint"
+    assert g2.b0_direction(dict(mv, direction_hint="DOWN"), CFG) == "DOWN"
+    assert g2.b0_direction(dict(mv, direction_hint=None), CFG) is None       # flags archived before the hint
 
 
 def test_backfilled_flag_enters_no_earlier_than_the_scouts_saw_it(world):
