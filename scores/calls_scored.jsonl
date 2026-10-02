@@ -1,0 +1,1 @@
+{"call_id": "agent-20261002T034124Z-001", "direction": "UP", "horizon_days": 5, "instrument": "USDINR=X", "probability": 0.56, "signal_family": "fx_macro", "status": "PENDING", "track": "agent", "version": "v1"}
