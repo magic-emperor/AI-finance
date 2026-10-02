@@ -20,6 +20,12 @@ from intel.validate import validate_ledger
 NOW = datetime(2026, 10, 1, 10, 0, tzinfo=timezone.utc)
 
 
+@pytest.fixture(autouse=True)
+def no_calendar_fetch(monkeypatch):
+    """run_scouts refreshes the NSE holiday calendar; tests must never touch the network."""
+    monkeypatch.setattr(run_scouts.nse_calendar, "refresh", lambda *a, **k: None)
+
+
 def test_ist_timestamps_convert_to_utc():
     assert ist_to_utc_iso("01-Oct-2026 11:26") == "2026-10-01T05:56:00Z"
     assert ist_to_utc_iso("23-SEP-2026") == "2026-09-22T18:30:00Z"
@@ -38,6 +44,7 @@ def sast(**o):
     r = {"acqSaleType": "Acquisition", "acquirerName": "Clarus", "company": "TCPL Packaging Limited",
          "symbol": "TCPLPACK", "promoterType": "N", "totAcqShare": "1.5", "totAftShare": "6.2",
          "acquisitionMode": "Open Market", "application_no": "1", "timestamp": "01-Oct-2026 11:26",
+         "acquirerDate": "29-SEP-2026 to 29-SEP-2026",
          "attachement": "https://nsearchives.nseindia.com/x.zip"}
     r.update(o)
     return r

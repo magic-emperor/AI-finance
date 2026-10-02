@@ -18,6 +18,12 @@ date -u
 ```
 `date -u` is the authoritative current time. Never modify `../code` or `../data`, never touch `.github/`, never push any branch except `claude/agent-ledger`.
 
+## 1b. Market calendar (every run)
+From `../code`: `python -m intel.nse_calendar --data ../data`
+- `HOLIDAY: <name>`: NSE is closed today. Skip steps 2–5 entirely (no queue, no reflection, no market view, no calls, and do NOT mark any flags consumed; they stay queued for the next trading day). Go to step 6 with status NO_NEW_INFORMATION, `sources` = `[{"source": "nse_calendar", "status": "OK", "n_items": 0}]`, notes "NSE holiday: <name>", and a findings report of one line. Keep the run short.
+- `TRADING_DAY`: continue normally.
+- `UNKNOWN: <why>`: continue as a trading day, and say so in the report's Coverage section.
+
 ## 2. What to investigate
 If a `<routine-fire-payload>` block is present, it is the scouts' escalation. Otherwise (the normal, scheduled case) read the queue yourself, from `../code`:
 ```
@@ -45,6 +51,11 @@ For ^NSEI, ^NSEBANK, USDINR=X (UP = rupee weakens), EURUSD=X, GC=F and CL=F, giv
 P(close 5 trading days from now > today's close) between 0.05 and 0.95 (0.50 = no view),
 each with a one-line reason based on evidence you opened this run. Put the table in the report.
 Do NOT record these as calls in the ledger.
+Record them, all six in one submission, from `../code` (the CLI stamps ids, time and hashes):
+```
+python -m intel.views append --file ../ledger/agent/macro_views.jsonl --json '{"run_id": ..., "version": "vN", "views": [{"instrument": "^NSEI", "p_up": 0.50, "reason": "<=200 chars"}, ... one each for ^NSEBANK, USDINR=X, EURUSD=X, GC=F, CL=F]}'
+```
+If it rejects the submission, fix the named field and retry; never write the file by hand.
 
 ## 4. Investigate each escalated name
 For each name in the queue (up to 10), run specialist subagents IN PARALLEL with the Agent tool. Run each specialist subagent with `model: "sonnet"`. Give each a self-contained brief with the symbol, the flags, and the evidence URLs:
@@ -69,6 +80,7 @@ If the CLI rejects a call, fix the specific field or drop the call. Never work a
 ```
 python -m intel.ledger append-run --dir ../ledger/ledger --json '{"run_id": ..., "track": "agent", "version": "vN", "started_at": <UTC>, "status": "OK"|"NO_NEW_INFORMATION"|"DEGRADED"|"FAILED", "sources": [{"source": ..., "status": ..., "n_items": ...}], "n_calls": <int>, "notes": "<=500 chars: what you examined and why you did or did not call"}'
 python -m intel.validate ../ledger/ledger
+python -m intel.views verify --file ../ledger/agent/macro_views.jsonl
 ```
 Then mark every flag id from the `FLAG_IDS:` line you investigated (called or declined), from `../code`:
 `python -m intel.agent_queue --data ../data --consumed ../ledger/agent/consumed.jsonl --mark <id> <id> ...`
