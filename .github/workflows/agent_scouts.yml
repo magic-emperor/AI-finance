@@ -7,7 +7,9 @@ name: Agent scouts
 
 on:
   schedule:
-    - cron: "*/15 3-10 * * 1-5"        # every 15 min, 08:30-16:15 IST (NSE session + filings)
+    # :11/:41, not */15: GitHub drops scheduled runs at busy times, worst on the hour and
+    # quarter-hour. */15 fired 3 of ~29 slots on 2026-10-01/02. Owner review of fire rate: 2026-10-09.
+    - cron: "11,41 3-10 * * 1-5"       # twice an hour, 08:41-16:11 IST (NSE session + filings)
     - cron: "7 0-2,11-23 * * 1-5"      # hourly outside the session (FX, global news, regulators)
   workflow_dispatch: {}
 
