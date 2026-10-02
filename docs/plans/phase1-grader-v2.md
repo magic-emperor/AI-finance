@@ -32,8 +32,9 @@
 - **B0:** each flag in its kind's default direction, per your decision Q5:
   - `sast_acquisition`, `bulk_deal_buy` and `block_deal_buy` are UP.
   - `volume_breakout` takes the breakout day's direction (the flag's own hint).
-  - `news_multi_source`, `volume_spurt_notice`, `macro_move`, `regulator_release` and untyped announcements are graded but kept out of B0.
-  - The typed-announcement table is **proposed and inactive** (see below).
+  - `macro_move` follows its hint, the sign of the move's z (owner decision 2026-10-02; flags archived before that carry no hint and stay out).
+  - `news_multi_source`, `volume_spurt_notice`, `regulator_release` and untyped announcements are graded but kept out of B0.
+  - Typed announcements follow the table approved on 2026-10-02: only "Bagging/Receiving of orders/contracts" has a default (UP).
 - **Champion − B0:** paired on the same opportunity, the decision's own entry and horizon, and the same costs. B0's direction for an opportunity is the majority default of its flags; ties and no defaults give no pair.
 - **REAFFIRM:** a CALL restating a still-open CALL (same role, instrument and direction) is left out of N.
 - **Excluded calls:** `agent-20261002T034124Z-001` is shown under "Excluded" with the reason "forced by the old step 3b", and never counted (Q4). Its p = 0.56 is graded as one data point in the macro calibration track.
@@ -73,6 +74,6 @@ The first live backfill graded 39 flags at 1 day, entering on 29–30 Sep. Those
 
 ## For your review
 
-1. **Typed-announcement directions** (`intel/config/grader_v2.json`, inactive). The proposal is that only "Bagging/Receiving of orders/contracts" gets a default (UP); the other categories the scouts flag are ambiguous and stay out. "Auditor resignation → DOWN" would need a scout change first, because that category isn't flagged today. Approving means flipping `active` to true in a PR.
-2. **`macro_move` in B0.** It is out for now. Your volume_breakout reasoning ("continue or reverse is a fair test") would apply to it too. Say if you want it to follow the move's direction.
+1. **Typed-announcement directions:** approved as proposed and active since 2026-10-02. "Auditor resignation → DOWN" still needs a scout change first, because that category isn't flagged today.
+2. **`macro_move` in B0:** follows the move's direction since 2026-10-02 (owner decision).
 3. **Switching the agent to summary v2** (§7.10). After about a week of shadow running, compare v1 and v2, then decide.

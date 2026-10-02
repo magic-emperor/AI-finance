@@ -60,7 +60,9 @@ def move_flags(closes_by_symbol: Dict[str, List[float]], asof: str) -> List[Dict
             f"{sym} moved {last * 100:+.2f}% ({z:+.1f} sigma) on {asof}",
             [{"url": f"https://finance.yahoo.com/quote/{sym}", "publisher": "Yahoo Finance",
               "published_at": now_utc_iso(), "claim": f"daily move {last * 100:+.2f}%, {z:+.1f} sigma vs 20d"}],
-            now_utc_iso(), extra={"z": round(z, 2), "reactive_by_construction": True}))
+            # hint = the move's own direction, as for volume_breakout; B0 then tests continuation
+            now_utc_iso(), direction_hint="UP" if z > 0 else "DOWN",
+            extra={"z": round(z, 2), "reactive_by_construction": True}))
     return flags
 
 
