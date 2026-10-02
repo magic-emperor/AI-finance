@@ -47,13 +47,17 @@ def save_state(path: str, state: Dict[str, Any]) -> None:
 
 
 def archive_flags(data_dir: str, flags: List[Dict[str, Any]], now: datetime) -> None:
+    """Archive with `seen_at` = when the scouts first saw it. `observed_at` is the source's own
+    publication time, which can be days earlier (a backfilled filing); grading from it would be
+    look-ahead, so the grader enters no earlier than seen_at."""
     if not flags:
         return
     d = os.path.join(data_dir, "archive", "flags")
     os.makedirs(d, exist_ok=True)
+    seen = now.strftime("%Y-%m-%dT%H:%M:%SZ")
     with open(os.path.join(d, f"{now:%Y-%m-%d}.jsonl"), "a", encoding="utf-8", newline="\n") as f:
         for fl in flags:
-            f.write(json.dumps(fl, sort_keys=True) + "\n")
+            f.write(json.dumps(dict(fl, seen_at=seen), sort_keys=True) + "\n")
 
 
 def pending_expiry(observed_at: str, cal) -> datetime:

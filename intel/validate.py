@@ -9,18 +9,20 @@ from __future__ import annotations
 import sys
 from typing import List, Optional
 
-from intel.ledger import read_records, verify_chain
-from intel.schema import validate_call, validate_run
+from intel.ledger import KINDS, read_records, verify_chain
+from intel.schema import validate_call, validate_decision, validate_run
+
+_CHECK = {"calls": (validate_call, "call_id"), "decisions": (validate_decision, "decision_id"),
+          "runs": (validate_run, "run_id")}
 
 
 def validate_ledger(ledger_dir: str) -> List[str]:
     errs: List[str] = []
-    for i, rec in enumerate(read_records(ledger_dir, "calls")):
-        errs += [f"calls[{i}] ({rec.get('call_id')}): {e}" for e in validate_call(rec)]
-    for i, rec in enumerate(read_records(ledger_dir, "runs")):
-        errs += [f"runs[{i}] ({rec.get('run_id')}): {e}" for e in validate_run(rec)]
-    errs += verify_chain(ledger_dir, "calls")
-    errs += verify_chain(ledger_dir, "runs")
+    for kind in KINDS:
+        check, id_field = _CHECK[kind]
+        for i, rec in enumerate(read_records(ledger_dir, kind)):
+            errs += [f"{kind}[{i}] ({rec.get(id_field)}): {e}" for e in check(rec)]
+        errs += verify_chain(ledger_dir, kind)
     return errs
 
 

@@ -11,6 +11,7 @@ The agent costs real subscription quota, so this is the gate:
 """
 from __future__ import annotations
 
+import hashlib
 import json
 from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional, Tuple
@@ -38,6 +39,16 @@ FAMILY = {
 }
 
 
+def opportunity_id(flags: List[Dict[str, Any]]) -> str:
+    """Deterministic id for one investigated opportunity: its symbol plus the exact flag set.
+
+    Decisions carry it (plan v2 §7.1) so the grader can pair each decision with the
+    mechanical baseline on the very same flags.
+    """
+    ids = ",".join(sorted(f["flag_id"] for f in flags))
+    return f"opp:{flags[0]['symbol'] or 'MACRO'}:{hashlib.sha1(ids.encode('utf-8')).hexdigest()[:12]}"
+
+
 def group_flags(flags: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     """Group by symbol (symbol-less flags stand alone), with confluence-boosted importance."""
     groups: Dict[str, List[Dict[str, Any]]] = {}
@@ -49,7 +60,7 @@ def group_flags(flags: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         families = {FAMILY.get(k, k) for k in kinds}
         combined = min(1.0, max(f["importance"] for f in fl) + CONFLUENCE_BONUS * (len(families) - 1))
         out.append({"key": key, "symbol": fl[0]["symbol"], "importance": round(combined, 3),
-                    "kinds": sorted(kinds), "flags": fl})
+                    "kinds": sorted(kinds), "flags": fl, "opportunity_id": opportunity_id(fl)})
     return sorted(out, key=lambda g: -g["importance"])
 
 
@@ -73,7 +84,8 @@ def build_text(groups: List[Dict[str, Any]], now: datetime) -> str:
     lines = [f"ESCALATION at {now:%Y-%m-%dT%H:%M:%SZ}. {len(groups)} candidate name(s), ranked by importance.",
              "Each block: symbol | combined importance | signal kinds | the underlying flags with evidence URLs."]
     for g in groups:
-        lines.append(f"\n## {g['symbol'] or 'MACRO'} | importance {g['importance']} | {', '.join(g['kinds'])}")
+        lines.append(f"\n## {g['symbol'] or 'MACRO'} | importance {g['importance']} | {', '.join(g['kinds'])} "
+                     f"| {g['opportunity_id']}")
         for f in g["flags"]:
             ev = f["evidence"][0] if f["evidence"] else {}
             lines.append(f"- [{f['kind']}] {f['summary']} (published {ev.get('published_at')}, "
