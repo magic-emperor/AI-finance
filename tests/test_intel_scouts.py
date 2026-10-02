@@ -202,10 +202,10 @@ def test_only_recent_regulator_releases_are_flagged():
 
 
 # ── escalation ────────────────────────────────────────────────────────────────
-def flag(kind, sym, imp, fid=None):
+def flag(kind, sym, imp, fid=None, observed_at="2026-10-01T05:00:00Z"):
     f = make_flag(kind, fid or f"{kind}{sym}", sym, imp, f"{kind} on {sym}",
-                  [{"url": "https://u", "publisher": "P", "published_at": "2026-10-01T05:00:00Z", "claim": "c"}],
-                  "2026-10-01T05:00:00Z")
+                  [{"url": "https://u", "publisher": "P", "published_at": observed_at, "claim": "c"}],
+                  observed_at)
     return f
 
 
@@ -275,7 +275,10 @@ def test_fire_failure_raises():
 # ── orchestrator ──────────────────────────────────────────────────────────────
 @pytest.fixture
 def patched(monkeypatch):
-    big = flag("sast_acquisition", "AAA", 0.9, "big1")
+    # Stamped "now": run_scouts drops pending flags older than 24h against the real clock,
+    # so a fixed date here made these tests start failing one day after they were written.
+    now = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    big = flag("sast_acquisition", "AAA", 0.9, "big1", observed_at=now)
     monkeypatch.setattr(run_scouts.filings, "run", lambda *a, **k: {
         "flags": [big], "sources": [{"source": "nse_sast_reg29", "status": "OK", "n_items": 1}]})
     for mod in (run_scouts.news,):
