@@ -156,6 +156,15 @@ def grade_calls(calls: List[dict], get_prices: PriceProvider, today: Optional[da
     return scored
 
 
+def decision_as_call(d: dict) -> dict:
+    """Since 2026-10-02 the agent records decisions (intel.ledger append-decision). v1 keeps grading
+    their CALLs under its own unchanged rules, so the v1/v2 shadow comparison stays possible."""
+    return {"call_id": d["decision_id"], "track": d["track"], "version": d["playbook_version"],
+            "created_at": d["created_at"], "instrument": d["instrument"], "direction": d["decision"],
+            "horizon_days": d["horizon_days"], "probability": d["probability"],
+            "signal_family": d["signal_family"], "reaffirms": d.get("reaffirms"), "test": d.get("test", False)}
+
+
 def summarize(scored: List[dict], seed: int = 0) -> List[dict]:
     groups: Dict[tuple, List[dict]] = {}
     for s in scored:
@@ -242,6 +251,7 @@ def main(argv: Optional[List[str]] = None) -> int:
     calls: List[dict] = []
     for d in args.ledger:
         calls += read_records(d, "calls")
+        calls += [decision_as_call(r) for r in read_records(d, "decisions") if r["decision"] in ("UP", "DOWN")]
     scored = grade_calls(calls, yfinance_provider)
     summary = summarize(scored)
     write_report(scored, summary, args.out)

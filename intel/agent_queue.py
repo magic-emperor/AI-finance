@@ -61,6 +61,9 @@ def main(argv=None) -> int:
         print("QUEUE EMPTY: no flag group above the escalation threshold awaits investigation.")
         return 0
     print(escalate.build_text(groups, datetime.now(timezone.utc)))
+    print("\nOPPORTUNITIES (one decision each: opportunity_id -> its flag_ids):")
+    for g in groups:
+        print(f"{g['opportunity_id']} {g['symbol'] or 'MACRO'} -> " + " ".join(fl["flag_id"] for fl in g["flags"]))
     print("\nFLAG_IDS: " + " ".join(fl["flag_id"] for g in groups for fl in g["flags"]))
     return 0
 

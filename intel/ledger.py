@@ -11,14 +11,18 @@ the fields it is responsible for (instrument, direction, thesis, evidence...)
 and the ledger stamps call_id / created_at / prev_hash / hash from the system
 clock. That removes the easiest way to backdate a "prediction".
 
-Layout:  <ledger_dir>/calls/YYYY-MM.jsonl   and   <ledger_dir>/runs/YYYY-MM.jsonl
-Calls and runs are two independent chains. Plain text JSONL (not SQLite) so
-git can rebase concurrent appends instead of hitting a binary merge conflict.
+Layout:  <ledger_dir>/{calls,decisions,runs}/YYYY-MM.jsonl, three independent chains.
+Plain text JSONL (not SQLite) so git can rebase concurrent appends instead of hitting a
+binary merge conflict.
+
+`decisions` (plan v2 §7.1) supersede `calls`: one per investigated opportunity, CALL (UP/DOWN)
+or NO_CALL with a reason, so abstaining is graded too. `append-call` stays valid for old records.
 
 CLI (what the cloud routine calls):
-    python -m intel.ledger append-call --dir ledger --json '{...}'
-    python -m intel.ledger append-run  --dir ledger --json '{...}'
-    python -m intel.ledger verify      --dir ledger
+    python -m intel.ledger append-decision --dir ledger --json '{...}'
+    python -m intel.ledger append-run      --dir ledger --json '{...}'
+    python -m intel.ledger append-call     --dir ledger --json '{...}'   (legacy)
+    python -m intel.ledger verify          --dir ledger
 """
 from __future__ import annotations
 
@@ -30,8 +34,11 @@ import sys
 from datetime import datetime, timezone
 from typing import Dict, List, Optional
 
-from intel.schema import (CALL_SCHEMA, RUN_SCHEMA, GENESIS_HASH,
-                          validate_call, validate_run)
+from intel.schema import (CALL_SCHEMA, DECISION_SCHEMA, RUN_SCHEMA, GENESIS_HASH,
+                          validate_call, validate_decision, validate_run)
+
+
+KINDS = ("calls", "decisions", "runs")          # three independent chains
 
 
 def canonical_json(rec: dict) -> str:
@@ -113,6 +120,29 @@ def append_call(ledger_dir: str, call: dict, now: Optional[datetime] = None) -> 
     return rec
 
 
+def append_decision(ledger_dir: str, decision: dict, now: Optional[datetime] = None) -> dict:
+    """Stamp and append one decision (CALL or NO_CALL). Raises ValueError listing every problem."""
+    rec = dict(decision)
+    for f in ("decision_id", "created_at", "schema", "prev_hash", "hash"):
+        rec.pop(f, None)                               # the ledger stamps these, never the caller
+    rec["schema"] = DECISION_SCHEMA
+    rec["created_at"] = _now_iso(now)
+    for f in ("reaffirms", "evidence_pack_id", "no_call_reason", "horizon_days", "probability", "signal_family"):
+        rec.setdefault(f, None)
+    rec.setdefault("rules_applied", [])
+    rec.setdefault("evidence", [])
+    stamp = rec["created_at"].replace("-", "").replace(":", "")
+    same_second = [r for r in read_records(ledger_dir, "decisions") if r["decision_id"].startswith(f"dec-{stamp}")]
+    rec["decision_id"] = f"dec-{stamp}-{len(same_second) + 1:03d}"
+    rec["prev_hash"] = _tail_hash(ledger_dir, "decisions")
+    rec["hash"] = compute_hash(rec)
+    errs = validate_decision(rec)
+    if errs:
+        raise ValueError("invalid decision: " + "; ".join(errs))
+    _append(ledger_dir, "decisions", rec, rec["created_at"][:7])
+    return rec
+
+
 def append_run(ledger_dir: str, run: dict, now: Optional[datetime] = None) -> dict:
     rec = dict(run)
     rec["schema"] = RUN_SCHEMA
@@ -129,7 +159,7 @@ def append_run(ledger_dir: str, run: dict, now: Optional[datetime] = None) -> di
 def main(argv: Optional[List[str]] = None) -> int:
     ap = argparse.ArgumentParser(prog="intel.ledger")
     sub = ap.add_subparsers(dest="cmd", required=True)
-    for name in ("append-call", "append-run"):
+    for name in ("append-call", "append-decision", "append-run"):
         p = sub.add_parser(name)
         p.add_argument("--dir", required=True)
         p.add_argument("--json", required=True, dest="payload")
@@ -138,19 +168,19 @@ def main(argv: Optional[List[str]] = None) -> int:
     args = ap.parse_args(argv)
 
     if args.cmd == "verify":
-        errs = verify_chain(args.dir, "calls") + verify_chain(args.dir, "runs")
+        errs = [e for kind in KINDS for e in verify_chain(args.dir, kind)]
         for e in errs:
             print("CHAIN ERROR:", e)
         print("ledger chain OK" if not errs else f"{len(errs)} chain error(s)")
         return 1 if errs else 0
 
+    appenders = {"append-call": append_call, "append-decision": append_decision, "append-run": append_run}
     try:
-        payload = json.loads(args.payload)
-        rec = (append_call if args.cmd == "append-call" else append_run)(args.dir, payload)
+        rec = appenders[args.cmd](args.dir, json.loads(args.payload))
     except Exception as e:
         print(f"REJECTED: {e}", file=sys.stderr)
         return 1
-    print(json.dumps({"ok": True, "id": rec.get("call_id") or rec.get("run_id")}))
+    print(json.dumps({"ok": True, "id": rec.get("decision_id") or rec.get("call_id") or rec.get("run_id")}))
     return 0
 
 

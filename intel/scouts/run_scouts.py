@@ -5,6 +5,7 @@ run_scouts.py — one scout pass. The scheduler IS the loop: no threads, no slee
 
 Writes to <data-dir> (a checkout of the `agent-data` branch):
     state/scout_state.json        dedup + pending + bhavcopy history + fire log
+    state/nse_holidays.json       NSE trading calendar, refreshed at most daily (intel.nse_calendar)
     archive/flags/YYYY-MM-DD.jsonl  every new flag ever seen (provenance)
     ledger/runs/YYYY-MM.jsonl     one hash-chained run record per pass, including quiet and failed ones
 
@@ -20,11 +21,12 @@ import sys
 from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List
 
+from intel import nse_calendar
 from intel.ledger import append_run
 from intel.scouts import escalate, filings, macro, market, news
 from intel.scouts.common import NSESession
 
-VERSION = "scouts_v1"
+VERSION = "scouts_v2"          # v2 (2026-10-02): SAST period down-weighting; pending lasts to next session close
 KEEP_SEEN_DAYS = 14
 PENDING_MAX_AGE = timedelta(hours=24)
 
@@ -45,21 +47,34 @@ def save_state(path: str, state: Dict[str, Any]) -> None:
 
 
 def archive_flags(data_dir: str, flags: List[Dict[str, Any]], now: datetime) -> None:
+    """Archive with `seen_at` = when the scouts first saw it. `observed_at` is the source's own
+    publication time, which can be days earlier (a backfilled filing); grading from it would be
+    look-ahead, so the grader enters no earlier than seen_at."""
     if not flags:
         return
     d = os.path.join(data_dir, "archive", "flags")
     os.makedirs(d, exist_ok=True)
+    seen = now.strftime("%Y-%m-%dT%H:%M:%SZ")
     with open(os.path.join(d, f"{now:%Y-%m-%d}.jsonl"), "a", encoding="utf-8", newline="\n") as f:
         for fl in flags:
-            f.write(json.dumps(fl, sort_keys=True) + "\n")
+            f.write(json.dumps(dict(fl, seen_at=seen), sort_keys=True) + "\n")
 
 
-def prune(state: Dict[str, Any], now: datetime) -> None:
+def pending_expiry(observed_at: str, cal) -> datetime:
+    """A pending flag lives 24h, or until the next NSE session close if that is later.
+
+    Wall-clock 24h alone dropped every flag raised on a Friday evening or the day before a
+    holiday before the agent's next trading-day run could see it.
+    """
+    seen = datetime.fromisoformat(observed_at.replace("Z", "+00:00"))
+    return max(seen + PENDING_MAX_AGE, nse_calendar.next_session_close(cal, seen))
+
+
+def prune(state: Dict[str, Any], now: datetime, cal=None) -> None:
     cutoff = (now - timedelta(days=KEEP_SEEN_DAYS)).strftime("%Y-%m-%dT%H:%M:%SZ")
     for k in ("seen", "escalated"):
         state[k] = {fid: ts for fid, ts in state[k].items() if ts >= cutoff}
-    pend_cut = (now - PENDING_MAX_AGE).strftime("%Y-%m-%dT%H:%M:%SZ")
-    state["pending"] = [f for f in state["pending"] if f["observed_at"] >= pend_cut]
+    state["pending"] = [f for f in state["pending"] if pending_expiry(f["observed_at"], cal) > now]
     state["fires"] = [t for t in state["fires"] if t >= cutoff]
 
 
@@ -82,6 +97,11 @@ def main(argv=None) -> int:
     def collect(result):
         new_flags.extend(result["flags"])
         sources.extend(result["sources"])
+
+    cal_source = nse_calendar.refresh(args.data_dir, session, now)
+    if cal_source:
+        sources.append(cal_source)
+    cal = nse_calendar.load(args.data_dir)
 
     if "filings" in run_set:
         d_from = (now - timedelta(days=2)).strftime("%d-%m-%Y")
@@ -121,7 +141,7 @@ def main(argv=None) -> int:
                 note = f"fire attempt FAILED: {str(e)[:150]} -- flags stay pending"
                 sources.append({"source": "agent_fire", "status": "FAILED", "n_items": 0, "error": str(e)[:150]})
 
-    prune(state, now)
+    prune(state, now, cal)
     save_state(state_path, state)
 
     failed = sum(s["status"] == "FAILED" for s in sources)
