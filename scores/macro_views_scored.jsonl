@@ -1,1 +1,7 @@
+{"created_at": "2026-10-05T09:41:15Z", "instrument": "^NSEI", "sealed": true, "status": "PENDING", "view_id": "view-20261005T094115Z-^NSEI", "visible": false, "week": 1396}
+{"created_at": "2026-10-05T09:41:15Z", "instrument": "^NSEBANK", "sealed": true, "status": "PENDING", "view_id": "view-20261005T094115Z-^NSEBANK", "visible": false, "week": 1396}
+{"created_at": "2026-10-05T09:41:15Z", "instrument": "USDINR=X", "sealed": true, "status": "PENDING", "view_id": "view-20261005T094115Z-USDINR=X", "visible": false, "week": 1396}
+{"created_at": "2026-10-05T09:41:15Z", "instrument": "EURUSD=X", "sealed": true, "status": "PENDING", "view_id": "view-20261005T094115Z-EURUSD=X", "visible": false, "week": 1396}
+{"created_at": "2026-10-05T09:41:15Z", "instrument": "GC=F", "sealed": true, "status": "PENDING", "view_id": "view-20261005T094115Z-GC=F", "visible": false, "week": 1396}
+{"created_at": "2026-10-05T09:41:15Z", "instrument": "CL=F", "sealed": true, "status": "PENDING", "view_id": "view-20261005T094115Z-CL=F", "visible": false, "week": 1396}
 {"created_at": "2026-10-02T03:41:24Z", "instrument": "USDINR=X", "p_up": 0.56, "source": "excluded_call", "status": "PENDING", "view_id": "agent-20261002T034124Z-001-as-view", "visible": true, "week": 1395}
