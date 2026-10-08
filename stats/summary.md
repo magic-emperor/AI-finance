@@ -1,13 +1,13 @@
-# Scoreboard v2 (shadow) — 2026-10-07 20:08Z
+# Scoreboard v2 (shadow) — 2026-10-08 20:06Z
 
 Grader grader_v2.0. Visible weeks only. Holdout weeks are sealed; only their counts are shown.
 Net of costs for NSE equities. Excess vs ^NSEI for .NS; raw return otherwise. Entry = decision-day close if before 15:00 IST, else next close. **Small samples: read the confidence intervals, not the means.**
 
 ## Coverage
 
-- Flags (opportunities): 665 total; visible 241 (graded at 5d 0, pending 241, ungradeable 0, no instrument 0); holdout 424 (sealed)
+- Flags (opportunities): 805 total; visible 241 (graded at 5d 0, pending 241, ungradeable 0, no instrument 0); holdout 564 (sealed)
 - Decisions: 2 total; visible 1; excluded 1; reaffirm 0
-- Macro views: 7 total; visible graded 0
+- Macro views: 13 total; visible graded 0
 
 ## Champion vs mechanical baseline (B0)
 
@@ -19,13 +19,13 @@ Net of costs for NSE equities. Excess vs ^NSEI for .NS; raw return otherwise. En
 
 | kind | horizon | graded | B0 rule | B0 n | B0 net (95% week-block CI) | B0 hit [Wilson] | mean cost | mean abs excess (no B0) |
 |---|---|---|---|---|---|---|---|---|
-| announcement | 1d | 33 | typed_announcement | 14 | -0.09% [-0.09%, -0.09%] n=14, 1 wk | 57.1% [32.6%, 78.6%] | 0.8% | - |
+| announcement | 1d | 30 | typed_announcement | 12 | +0.22% [+0.22%, +0.22%] n=12, 1 wk | 66.7% [39.1%, 86.2%] | 0.7% | - |
 | announcement | 5d | 0 | typed_announcement | 0 | - | - | - | - |
 | announcement | 20d | 0 | typed_announcement | 0 | - | - | - | - |
 | block_deal_buy | 1d | 2 | UP | 2 | -0.89% [-0.89%, -0.89%] n=2, 1 wk | 50.0% [9.5%, 90.5%] | 0.7% | - |
 | block_deal_buy | 5d | 0 | UP | 0 | - | - | - | - |
 | block_deal_buy | 20d | 0 | UP | 0 | - | - | - | - |
-| bulk_deal_buy | 1d | 6 | UP | 6 | -2.00% [-2.00%, -2.00%] n=6, 1 wk | 16.7% [3.0%, 56.4%] | 0.6% | - |
+| bulk_deal_buy | 1d | 3 | UP | 3 | -1.47% [-1.47%, -1.47%] n=3, 1 wk | 33.3% [6.1%, 79.2%] | 0.8% | - |
 | bulk_deal_buy | 5d | 0 | UP | 0 | - | - | - | - |
 | bulk_deal_buy | 20d | 0 | UP | 0 | - | - | - | - |
 | macro_move | 1d | 3 | hint | 1 | +0.33% [+0.33%, +0.33%] n=1, 1 wk | 100.0% [20.7%, 100.0%] | 0.0% | - |
@@ -34,13 +34,13 @@ Net of costs for NSE equities. Excess vs ^NSEI for .NS; raw return otherwise. En
 | news_multi_source | 1d | 0 | not in B0 | 0 | - | - | - | - |
 | news_multi_source | 5d | 0 | not in B0 | 0 | - | - | - | - |
 | news_multi_source | 20d | 0 | not in B0 | 0 | - | - | - | - |
-| sast_acquisition | 1d | 2 | UP | 2 | +2.61% [+2.61%, +2.61%] n=2, 1 wk | 50.0% [9.5%, 90.5%] | 0.6% | - |
+| sast_acquisition | 1d | 1 | UP | 1 | +6.65% [+6.65%, +6.65%] n=1, 1 wk | 100.0% [20.7%, 100.0%] | 0.8% | - |
 | sast_acquisition | 5d | 0 | UP | 0 | - | - | - | - |
 | sast_acquisition | 20d | 0 | UP | 0 | - | - | - | - |
-| volume_breakout | 1d | 25 | hint | 25 | -0.74% [-0.74%, -0.74%] n=25, 1 wk | 56.0% [37.1%, 73.3%] | 0.7% | - |
+| volume_breakout | 1d | 25 | hint | 25 | -0.75% [-0.75%, -0.75%] n=25, 1 wk | 60.0% [40.7%, 76.6%] | 0.7% | - |
 | volume_breakout | 5d | 0 | hint | 0 | - | - | - | - |
 | volume_breakout | 20d | 0 | hint | 0 | - | - | - | - |
-| volume_spurt_notice | 1d | 11 | not in B0 | 0 | - | - | - | 0.7% |
+| volume_spurt_notice | 1d | 10 | not in B0 | 0 | - | - | - | 0.7% |
 | volume_spurt_notice | 5d | 0 | not in B0 | 0 | - | - | - | - |
 | volume_spurt_notice | 20d | 0 | not in B0 | 0 | - | - | - | - |
 
