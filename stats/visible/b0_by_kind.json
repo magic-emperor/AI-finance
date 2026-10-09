@@ -1,26 +1,26 @@
 {
- "generated_at": "2026-10-08T20:06:04Z",
+ "generated_at": "2026-10-09T19:43:13Z",
  "grader": "grader_v2.0",
  "rows": [
   {
    "b0_direction_rule": "typed_announcement",
-   "b0_hit": 0.6666666666666666,
+   "b0_hit": 0.6060606060606061,
    "b0_hit_ci": [
-    0.3906175873976139,
-    0.8618821601026385
+    0.4368314280651038,
+    0.7531711776849179
    ],
-   "b0_n": 12,
+   "b0_n": 33,
    "b0_net": {
-    "hi": 0.002201302165240931,
-    "lo": 0.002201302165240931,
-    "mean": 0.002201302165240931,
-    "n": 12,
+    "hi": 0.0062218002131749954,
+    "lo": 0.0062218002131749954,
+    "mean": 0.0062218002131749954,
+    "n": 33,
     "weeks": 1
    },
-   "graded": 30,
+   "graded": 91,
    "horizon": 1,
    "kind": "announcement",
-   "mean_cost": 0.007460811999999998
+   "mean_cost": 0.006824448363636364
   },
   {
    "b0_direction_rule": "typed_announcement",
@@ -33,38 +33,6 @@
    "graded": 0,
    "horizon": 20,
    "kind": "announcement"
-  },
-  {
-   "b0_direction_rule": "UP",
-   "b0_hit": 0.5,
-   "b0_hit_ci": [
-    0.09452865480086614,
-    0.9054713451991339
-   ],
-   "b0_n": 2,
-   "b0_net": {
-    "hi": -0.008862133245972532,
-    "lo": -0.008862133245972532,
-    "mean": -0.008862133245972532,
-    "n": 2,
-    "weeks": 1
-   },
-   "graded": 2,
-   "horizon": 1,
-   "kind": "block_deal_buy",
-   "mean_cost": 0.006960812
-  },
-  {
-   "b0_direction_rule": "UP",
-   "graded": 0,
-   "horizon": 5,
-   "kind": "block_deal_buy"
-  },
-  {
-   "b0_direction_rule": "UP",
-   "graded": 0,
-   "horizon": 20,
-   "kind": "block_deal_buy"
   },
   {
    "b0_direction_rule": "UP",
@@ -75,16 +43,48 @@
    ],
    "b0_n": 3,
    "b0_net": {
-    "hi": -0.014659792888644121,
-    "lo": -0.014659792888644121,
-    "mean": -0.014659792888644121,
+    "hi": -0.010170434772630318,
+    "lo": -0.010170434772630318,
+    "mean": -0.010170434772630318,
     "n": 3,
     "weeks": 1
    },
    "graded": 3,
    "horizon": 1,
+   "kind": "block_deal_buy",
+   "mean_cost": 0.005794145333333334
+  },
+  {
+   "b0_direction_rule": "UP",
+   "graded": 0,
+   "horizon": 5,
+   "kind": "block_deal_buy"
+  },
+  {
+   "b0_direction_rule": "UP",
+   "graded": 0,
+   "horizon": 20,
+   "kind": "block_deal_buy"
+  },
+  {
+   "b0_direction_rule": "UP",
+   "b0_hit": 0.4,
+   "b0_hit_ci": [
+    0.28971847853161004,
+    0.5214422150025321
+   ],
+   "b0_n": 65,
+   "b0_net": {
+    "hi": -0.008782797397864642,
+    "lo": -0.008782797397864642,
+    "mean": -0.008782797397864642,
+    "n": 65,
+    "weeks": 1
+   },
+   "graded": 65,
+   "horizon": 1,
    "kind": "bulk_deal_buy",
-   "mean_cost": 0.008460812
+   "mean_cost": 0.007322350461538461
   },
   {
    "b0_direction_rule": "UP",
@@ -132,9 +132,10 @@
   },
   {
    "b0_direction_rule": null,
-   "graded": 0,
+   "graded": 5,
    "horizon": 1,
-   "kind": "news_multi_source"
+   "kind": "news_multi_source",
+   "mean_abs_excess": 0.020685159841707112
   },
   {
    "b0_direction_rule": null,
@@ -150,23 +151,23 @@
   },
   {
    "b0_direction_rule": "UP",
-   "b0_hit": 1.0,
+   "b0_hit": 0.6666666666666666,
    "b0_hit_ci": [
-    0.20654329147389294,
-    1.0
+    0.2076549551264879,
+    0.9385096847238394
    ],
-   "b0_n": 1,
+   "b0_n": 3,
    "b0_net": {
-    "hi": 0.06653533474216804,
-    "lo": 0.06653533474216804,
-    "mean": 0.06653533474216804,
-    "n": 1,
+    "hi": 0.02033696412245471,
+    "lo": 0.02033696412245471,
+    "mean": 0.02033696412245471,
+    "n": 3,
     "weeks": 1
    },
-   "graded": 1,
+   "graded": 3,
    "horizon": 1,
    "kind": "sast_acquisition",
-   "mean_cost": 0.008460812
+   "mean_cost": 0.006794145333333334
   },
   {
    "b0_direction_rule": "UP",
@@ -182,23 +183,23 @@
   },
   {
    "b0_direction_rule": "hint",
-   "b0_hit": 0.6,
+   "b0_hit": 0.5434782608695652,
    "b0_hit_ci": [
-    0.40739127785127344,
-    0.7659694233580909
+    0.4017993496608042,
+    0.67845489578878
    ],
-   "b0_n": 25,
+   "b0_n": 46,
    "b0_net": {
-    "hi": -0.007529307612086653,
-    "lo": -0.007529307612086653,
-    "mean": -0.007529307612086653,
-    "n": 25,
+    "hi": -0.00788658980616826,
+    "lo": -0.00788658980616826,
+    "mean": -0.00788658980616826,
+    "n": 46,
     "weeks": 1
    },
-   "graded": 25,
+   "graded": 46,
    "horizon": 1,
    "kind": "volume_breakout",
-   "mean_cost": 0.007420812
+   "mean_cost": 0.00706950765217391
   },
   {
    "b0_direction_rule": "hint",
@@ -214,10 +215,10 @@
   },
   {
    "b0_direction_rule": null,
-   "graded": 10,
+   "graded": 25,
    "horizon": 1,
    "kind": "volume_spurt_notice",
-   "mean_abs_excess": 0.006904018494502307
+   "mean_abs_excess": 0.011885081943031941
   },
   {
    "b0_direction_rule": null,
