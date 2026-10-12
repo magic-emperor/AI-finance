@@ -1,6 +1,6 @@
 # Prediction agent scoreboard
 
-Generated 2026-10-09 19:43Z.
+Generated 2026-10-12 22:13Z.
 
 > **No verdict is valid before the T+90 checkpoint.** At n~60 a one-sided 5% test can only
 > detect roughly a 61%+ hit rate: a month can show a track is broken, never that it works.
@@ -8,4 +8,4 @@ Generated 2026-10-09 19:43Z.
 
 | track | version | calls | graded | pending | reaffirm | primary n (5d, non-reactive) | hit rate | mean excess | perm p | momentum mean | brier | primary endpoint |
 |---|---|---|---|---|---|---|---|---|---|---|---|---|
-| agent | v1 | 1 | 0 | 1 | 0 | 0 | - | - | - | - | - | not met |
+| agent | v1 | 1 | 1 | 0 | 0 | 1 | 100.00% | 0.52% | 0.508 | 0.52% | 0.194 | not met |

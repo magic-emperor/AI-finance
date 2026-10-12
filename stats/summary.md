@@ -1,13 +1,13 @@
-# Scoreboard v2 (shadow) — 2026-10-09 19:43Z
+# Scoreboard v2 (shadow) — 2026-10-12 22:13Z
 
 Grader grader_v2.0. Visible weeks only. Holdout weeks are sealed; only their counts are shown.
 Net of costs for NSE equities. Excess vs ^NSEI for .NS; raw return otherwise. Entry = decision-day close if before 15:00 IST, else next close. **Small samples: read the confidence intervals, not the means.**
 
 ## Coverage
 
-- Flags (opportunities): 933 total; visible 241 (graded at 5d 0, pending 241, ungradeable 0, no instrument 0); holdout 692 (sealed)
+- Flags (opportunities): 1046 total; visible 353 (graded at 5d 1, pending 352, ungradeable 0, no instrument 0); holdout 693 (sealed)
 - Decisions: 4 total; visible 1; excluded 1; reaffirm 0
-- Macro views: 19 total; visible graded 0
+- Macro views: 19 total; visible graded 1
 
 ## Champion vs mechanical baseline (B0)
 
@@ -29,7 +29,7 @@ Net of costs for NSE equities. Excess vs ^NSEI for .NS; raw return otherwise. En
 | bulk_deal_buy | 5d | 0 | UP | 0 | - | - | - | - |
 | bulk_deal_buy | 20d | 0 | UP | 0 | - | - | - | - |
 | macro_move | 1d | 3 | hint | 1 | +0.33% [+0.33%, +0.33%] n=1, 1 wk | 100.0% [20.7%, 100.0%] | 0.0% | - |
-| macro_move | 5d | 0 | hint | 0 | - | - | - | - |
+| macro_move | 5d | 1 | hint | 0 | - | - | - | 0.3% |
 | macro_move | 20d | 0 | hint | 0 | - | - | - | - |
 | news_multi_source | 1d | 5 | not in B0 | 0 | - | - | - | 2.1% |
 | news_multi_source | 5d | 0 | not in B0 | 0 | - | - | - | - |
@@ -54,7 +54,8 @@ Net of costs for NSE equities. Excess vs ^NSEI for .NS; raw return otherwise. En
 
 | market | n | Brier | climatology Brier | skill vs climatology |
 |---|---|---|---|---|
-| (none graded yet) | | | | |
+| USDINR=X | 1 | 0.194 | 0.130 | -0.486 |
+| ALL | 1 | 0.194 | 0.130 | -0.486 |
 
 ## Excluded (shown, never counted)
 

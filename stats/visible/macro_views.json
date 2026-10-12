@@ -1,5 +1,20 @@
 {
- "generated_at": "2026-10-09T19:43:13Z",
+ "generated_at": "2026-10-12T22:13:46Z",
  "grader": "grader_v2.0",
- "rows": []
+ "rows": [
+  {
+   "brier": 0.19359999999999997,
+   "brier_clim": 0.1302394966181061,
+   "instrument": "USDINR=X",
+   "n": 1,
+   "skill_vs_clim": -0.4864922318279705
+  },
+  {
+   "brier": 0.19359999999999997,
+   "brier_clim": 0.1302394966181061,
+   "instrument": "ALL",
+   "n": 1,
+   "skill_vs_clim": -0.4864922318279705
+  }
+ ]
 }

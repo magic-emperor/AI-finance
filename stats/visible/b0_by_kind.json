@@ -1,5 +1,5 @@
 {
- "generated_at": "2026-10-09T19:43:13Z",
+ "generated_at": "2026-10-12T22:13:46Z",
  "grader": "grader_v2.0",
  "rows": [
   {
@@ -120,9 +120,10 @@
   },
   {
    "b0_direction_rule": "hint",
-   "graded": 0,
+   "graded": 1,
    "horizon": 5,
-   "kind": "macro_move"
+   "kind": "macro_move",
+   "mean_abs_excess": 0.003274216795771112
   },
   {
    "b0_direction_rule": "hint",
