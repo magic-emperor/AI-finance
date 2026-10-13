@@ -1,5 +1,5 @@
 {
- "generated_at": "2026-10-12T22:13:46Z",
+ "generated_at": "2026-10-13T20:20:25Z",
  "grader": "grader_v2.0",
  "rows": [
   {
@@ -24,9 +24,23 @@
   },
   {
    "b0_direction_rule": "typed_announcement",
-   "graded": 0,
+   "b0_hit": 0.6060606060606061,
+   "b0_hit_ci": [
+    0.4368314280651038,
+    0.7531711776849179
+   ],
+   "b0_n": 33,
+   "b0_net": {
+    "hi": 0.02161650041841297,
+    "lo": 0.02161650041841297,
+    "mean": 0.02161650041841297,
+    "n": 33,
+    "weeks": 1
+   },
+   "graded": 91,
    "horizon": 5,
-   "kind": "announcement"
+   "kind": "announcement",
+   "mean_cost": 0.006824448363636364
   },
   {
    "b0_direction_rule": "typed_announcement",
@@ -56,9 +70,23 @@
   },
   {
    "b0_direction_rule": "UP",
-   "graded": 0,
+   "b0_hit": 0.6666666666666666,
+   "b0_hit_ci": [
+    0.2076549551264879,
+    0.9385096847238394
+   ],
+   "b0_n": 3,
+   "b0_net": {
+    "hi": 0.007826516766736957,
+    "lo": 0.007826516766736957,
+    "mean": 0.007826516766736957,
+    "n": 3,
+    "weeks": 1
+   },
+   "graded": 3,
    "horizon": 5,
-   "kind": "block_deal_buy"
+   "kind": "block_deal_buy",
+   "mean_cost": 0.005794145333333334
   },
   {
    "b0_direction_rule": "UP",
@@ -88,9 +116,23 @@
   },
   {
    "b0_direction_rule": "UP",
-   "graded": 0,
+   "b0_hit": 0.38461538461538464,
+   "b0_hit_ci": [
+    0.27594829385374525,
+    0.5061601986856494
+   ],
+   "b0_n": 65,
+   "b0_net": {
+    "hi": 0.0011607246377972513,
+    "lo": 0.0011607246377972513,
+    "mean": 0.0011607246377972513,
+    "n": 65,
+    "weeks": 1
+   },
+   "graded": 65,
    "horizon": 5,
-   "kind": "bulk_deal_buy"
+   "kind": "bulk_deal_buy",
+   "mean_cost": 0.007322350461538461
   },
   {
    "b0_direction_rule": "UP",
@@ -120,10 +162,23 @@
   },
   {
    "b0_direction_rule": "hint",
-   "graded": 1,
+   "b0_hit": 1.0,
+   "b0_hit_ci": [
+    0.20654329147389294,
+    1.0
+   ],
+   "b0_n": 1,
+   "b0_net": {
+    "hi": 0.00442591014761573,
+    "lo": 0.00442591014761573,
+    "mean": 0.00442591014761573,
+    "n": 1,
+    "weeks": 1
+   },
+   "graded": 3,
    "horizon": 5,
    "kind": "macro_move",
-   "mean_abs_excess": 0.003274216795771112
+   "mean_cost": 0.0
   },
   {
    "b0_direction_rule": "hint",
@@ -140,9 +195,10 @@
   },
   {
    "b0_direction_rule": null,
-   "graded": 0,
+   "graded": 5,
    "horizon": 5,
-   "kind": "news_multi_source"
+   "kind": "news_multi_source",
+   "mean_abs_excess": 0.04056230192182784
   },
   {
    "b0_direction_rule": null,
@@ -172,9 +228,23 @@
   },
   {
    "b0_direction_rule": "UP",
-   "graded": 0,
+   "b0_hit": 0.3333333333333333,
+   "b0_hit_ci": [
+    0.0614903152761605,
+    0.7923450448735121
+   ],
+   "b0_n": 3,
+   "b0_net": {
+    "hi": -0.00984715713113045,
+    "lo": -0.00984715713113045,
+    "mean": -0.00984715713113045,
+    "n": 3,
+    "weeks": 1
+   },
+   "graded": 3,
    "horizon": 5,
-   "kind": "sast_acquisition"
+   "kind": "sast_acquisition",
+   "mean_cost": 0.006794145333333334
   },
   {
    "b0_direction_rule": "UP",
@@ -204,9 +274,23 @@
   },
   {
    "b0_direction_rule": "hint",
-   "graded": 0,
+   "b0_hit": 0.5238095238095238,
+   "b0_hit_ci": [
+    0.3772221394020704,
+    0.6664063552403504
+   ],
+   "b0_n": 42,
+   "b0_net": {
+    "hi": 0.0005753761195827322,
+    "lo": 0.0005753761195827322,
+    "mean": 0.0005753761195827322,
+    "n": 42,
+    "weeks": 1
+   },
+   "graded": 42,
    "horizon": 5,
-   "kind": "volume_breakout"
+   "kind": "volume_breakout",
+   "mean_cost": 0.006937002476190475
   },
   {
    "b0_direction_rule": "hint",
@@ -223,9 +307,10 @@
   },
   {
    "b0_direction_rule": null,
-   "graded": 0,
+   "graded": 25,
    "horizon": 5,
-   "kind": "volume_spurt_notice"
+   "kind": "volume_spurt_notice",
+   "mean_abs_excess": 0.028749731903365584
   },
   {
    "b0_direction_rule": null,
