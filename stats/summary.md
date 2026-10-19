@@ -1,11 +1,11 @@
-# Scoreboard v2 (shadow) — 2026-10-16 18:19Z
+# Scoreboard v2 (shadow) — 2026-10-19 20:09Z
 
 Grader grader_v2.0. Visible weeks only. Holdout weeks are sealed; only their counts are shown.
 Net of costs for NSE equities. Excess vs ^NSEI for .NS; raw return otherwise. Entry = decision-day close if before 15:00 IST, else next close. **Small samples: read the confidence intervals, not the means.**
 
 ## Coverage
 
-- Flags (opportunities): 1604 total; visible 911 (graded at 5d 241, pending 670, ungradeable 0, no instrument 0); holdout 693 (sealed)
+- Flags (opportunities): 1719 total; visible 913 (graded at 5d 241, pending 672, ungradeable 0, no instrument 0); holdout 806 (sealed)
 - Decisions: 4 total; visible 1; excluded 1; reaffirm 0
 - Macro views: 19 total; visible graded 1
 

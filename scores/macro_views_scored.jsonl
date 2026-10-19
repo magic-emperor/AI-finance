@@ -12,8 +12,8 @@
 {"created_at": "2026-10-08T03:41:58Z", "instrument": "CL=F", "sealed": true, "status": "GRADED", "view_id": "view-20261008T034158Z-CL=F", "visible": false, "week": 1396}
 {"created_at": "2026-10-09T03:42:46Z", "instrument": "^NSEI", "sealed": true, "status": "GRADED", "view_id": "view-20261009T034246Z-^NSEI", "visible": false, "week": 1396}
 {"created_at": "2026-10-09T03:42:46Z", "instrument": "^NSEBANK", "sealed": true, "status": "GRADED", "view_id": "view-20261009T034246Z-^NSEBANK", "visible": false, "week": 1396}
-{"created_at": "2026-10-09T03:42:46Z", "instrument": "USDINR=X", "sealed": true, "status": "PENDING", "view_id": "view-20261009T034246Z-USDINR=X", "visible": false, "week": 1396}
-{"created_at": "2026-10-09T03:42:46Z", "instrument": "EURUSD=X", "sealed": true, "status": "PENDING", "view_id": "view-20261009T034246Z-EURUSD=X", "visible": false, "week": 1396}
-{"created_at": "2026-10-09T03:42:46Z", "instrument": "GC=F", "sealed": true, "status": "PENDING", "view_id": "view-20261009T034246Z-GC=F", "visible": false, "week": 1396}
-{"created_at": "2026-10-09T03:42:46Z", "instrument": "CL=F", "sealed": true, "status": "PENDING", "view_id": "view-20261009T034246Z-CL=F", "visible": false, "week": 1396}
+{"created_at": "2026-10-09T03:42:46Z", "instrument": "USDINR=X", "sealed": true, "status": "GRADED", "view_id": "view-20261009T034246Z-USDINR=X", "visible": false, "week": 1396}
+{"created_at": "2026-10-09T03:42:46Z", "instrument": "EURUSD=X", "sealed": true, "status": "GRADED", "view_id": "view-20261009T034246Z-EURUSD=X", "visible": false, "week": 1396}
+{"created_at": "2026-10-09T03:42:46Z", "instrument": "GC=F", "sealed": true, "status": "GRADED", "view_id": "view-20261009T034246Z-GC=F", "visible": false, "week": 1396}
+{"created_at": "2026-10-09T03:42:46Z", "instrument": "CL=F", "sealed": true, "status": "GRADED", "view_id": "view-20261009T034246Z-CL=F", "visible": false, "week": 1396}
 {"base_date": "2026-10-02", "brier": 0.19359999999999997, "brier_clim": 0.1302394966181061, "created_at": "2026-10-02T03:41:24Z", "exit_date": "2026-10-09", "instrument": "USDINR=X", "p_clim": 0.6391129032258065, "p_up": 0.56, "source": "excluded_call", "status": "GRADED", "up": true, "view_id": "agent-20261002T034124Z-001-as-view", "visible": true, "week": 1395}
