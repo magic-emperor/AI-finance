@@ -1,11 +1,11 @@
-# Scoreboard v2 (shadow) — 2026-10-20 18:42Z
+# Scoreboard v2 (shadow) — 2026-10-21 18:53Z
 
 Grader grader_v2.0. Visible weeks only. Holdout weeks are sealed; only their counts are shown.
 Net of costs for NSE equities. Excess vs ^NSEI for .NS; raw return otherwise. Entry = decision-day close if before 15:00 IST, else next close. **Small samples: read the confidence intervals, not the means.**
 
 ## Coverage
 
-- Flags (opportunities): 1741 total; visible 913 (graded at 5d 245, pending 668, ungradeable 0, no instrument 0); holdout 828 (sealed)
+- Flags (opportunities): 1812 total; visible 913 (graded at 5d 246, pending 667, ungradeable 0, no instrument 0); holdout 899 (sealed)
 - Decisions: 4 total; visible 1; excluded 1; reaffirm 0
 - Macro views: 19 total; visible graded 1
 
@@ -28,8 +28,8 @@ Net of costs for NSE equities. Excess vs ^NSEI for .NS; raw return otherwise. En
 | bulk_deal_buy | 1d | 263 | UP | 263 | -1.85% [-2.17%, -0.69%] n=263, 2 wk | 35.4% [29.8%, 41.3%] | 0.7% | - |
 | bulk_deal_buy | 5d | 57 | UP | 57 | -0.17% [-0.17%, -0.17%] n=57, 1 wk | 31.6% [21.0%, 44.5%] | 0.7% | - |
 | bulk_deal_buy | 20d | 0 | UP | 0 | - | - | - | - |
-| macro_move | 1d | 14 | hint | 12 | +0.46% [+0.33%, +0.47%] n=12, 2 wk | 75.0% [46.8%, 91.1%] | 0.0% | - |
-| macro_move | 5d | 4 | hint | 2 | +1.15% [+0.44%, +1.86%] n=2, 2 wk | 100.0% [34.2%, 100.0%] | 0.0% | - |
+| macro_move | 1d | 15 | hint | 13 | +0.42% [+0.33%, +0.43%] n=13, 2 wk | 69.2% [42.4%, 87.3%] | 0.0% | - |
+| macro_move | 5d | 5 | hint | 3 | +1.04% [+0.44%, +1.34%] n=3, 2 wk | 100.0% [43.8%, 100.0%] | 0.0% | - |
 | macro_move | 20d | 0 | hint | 0 | - | - | - | - |
 | news_multi_source | 1d | 61 | not in B0 | 0 | - | - | - | 3.1% |
 | news_multi_source | 5d | 9 | not in B0 | 0 | - | - | - | 4.3% |
