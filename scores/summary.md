@@ -1,6 +1,6 @@
 # Prediction agent scoreboard
 
-Generated 2026-11-12 21:34Z.
+Generated 2026-11-13 20:58Z.
 
 > **No verdict is valid before the T+90 checkpoint.** At n~60 a one-sided 5% test can only
 > detect roughly a 61%+ hit rate: a month can show a track is broken, never that it works.
