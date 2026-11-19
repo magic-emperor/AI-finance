@@ -1,11 +1,11 @@
-# Scoreboard v2 (shadow) — 2026-11-18 22:18Z
+# Scoreboard v2 (shadow) — 2026-11-19 22:25Z
 
 Grader grader_v2.0. Visible weeks only. Holdout weeks are sealed; only their counts are shown.
 Net of costs for NSE equities. Excess vs ^NSEI for .NS; raw return otherwise. Entry = decision-day close if before 15:00 IST, else next close. **Small samples: read the confidence intervals, not the means.**
 
 ## Coverage
 
-- Flags (opportunities): 4048 total; visible 1860 (graded at 5d 1363, pending 494, ungradeable 3, no instrument 0); holdout 2188 (sealed)
+- Flags (opportunities): 4173 total; visible 1860 (graded at 5d 1521, pending 336, ungradeable 3, no instrument 0); holdout 2313 (sealed)
 - Decisions: 4 total; visible 1; excluded 1; reaffirm 0
 - Macro views: 19 total; visible graded 1
 
@@ -19,39 +19,39 @@ Net of costs for NSE equities. Excess vs ^NSEI for .NS; raw return otherwise. En
 
 | kind | horizon | graded | B0 rule | B0 n | B0 net (95% week-block CI) | B0 hit [Wilson] | mean cost | mean abs excess (no B0) |
 |---|---|---|---|---|---|---|---|---|
-| announcement | 1d | 346 | typed_announcement | 114 | -1.01% [-2.29%, +0.11%] n=114, 4 wk | 38.6% [30.2%, 47.8%] | 0.7% | - |
-| announcement | 5d | 292 | typed_announcement | 100 | -2.63% [-6.88%, +1.69%] n=100, 4 wk | 33.0% [24.6%, 42.7%] | 0.7% | - |
-| announcement | 20d | 169 | typed_announcement | 56 | -11.68% [-15.63%, -8.92%] n=56, 2 wk | 10.7% [5.0%, 21.5%] | 0.7% | - |
+| announcement | 1d | 348 | typed_announcement | 116 | -1.07% [-2.32%, +0.07%] n=116, 4 wk | 37.9% [29.6%, 47.0%] | 0.7% | - |
+| announcement | 5d | 310 | typed_announcement | 105 | -2.73% [-7.14%, +1.44%] n=105, 4 wk | 34.3% [25.9%, 43.8%] | 0.7% | - |
+| announcement | 20d | 182 | typed_announcement | 61 | -12.34% [-16.36%, -8.92%] n=61, 2 wk | 9.8% [4.6%, 19.8%] | 0.7% | - |
 | block_deal_buy | 1d | 41 | UP | 41 | -0.83% [-2.55%, -0.22%] n=41, 4 wk | 63.4% [48.1%, 76.4%] | 0.4% | - |
-| block_deal_buy | 5d | 14 | UP | 14 | -1.92% [-3.14%, +0.78%] n=14, 3 wk | 28.6% [11.7%, 54.6%] | 0.4% | - |
+| block_deal_buy | 5d | 15 | UP | 15 | -1.93% [-3.04%, +0.49%] n=15, 4 wk | 26.7% [10.9%, 52.0%] | 0.4% | - |
 | block_deal_buy | 20d | 5 | UP | 5 | -4.93% [-7.45%, -1.17%] n=5, 2 wk | 20.0% [3.6%, 62.4%] | 0.5% | - |
-| bulk_deal_buy | 1d | 559 | UP | 559 | -2.01% [-2.35%, -1.28%] n=559, 4 wk | 33.5% [29.7%, 37.5%] | 0.7% | - |
-| bulk_deal_buy | 5d | 412 | UP | 412 | -6.94% [-9.01%, -0.17%] n=412, 3 wk | 13.8% [10.8%, 17.5%] | 0.6% | - |
-| bulk_deal_buy | 20d | 263 | UP | 263 | -16.27% [-18.46%, -8.38%] n=263, 2 wk | 12.5% [9.1%, 17.1%] | 0.7% | - |
+| bulk_deal_buy | 1d | 612 | UP | 612 | -2.14% [-2.57%, -1.33%] n=612, 4 wk | 31.9% [28.3%, 35.7%] | 0.7% | - |
+| bulk_deal_buy | 5d | 486 | UP | 486 | -6.96% [-9.07%, -1.22%] n=486, 4 wk | 15.6% [12.7%, 19.1%] | 0.6% | - |
+| bulk_deal_buy | 20d | 336 | UP | 336 | -16.35% [-18.12%, -8.98%] n=336, 2 wk | 10.1% [7.3%, 13.8%] | 0.7% | - |
 | macro_move | 1d | 32 | hint | 30 | +0.21% [+0.02%, +0.42%] n=30, 4 wk | 66.7% [48.8%, 80.8%] | 0.0% | - |
-| macro_move | 5d | 25 | hint | 23 | -0.34% [-1.00%, +0.15%] n=23, 4 wk | 60.9% [40.8%, 77.8%] | 0.0% | - |
+| macro_move | 5d | 26 | hint | 24 | -0.28% [-0.95%, +0.34%] n=24, 4 wk | 62.5% [42.7%, 78.8%] | 0.0% | - |
 | macro_move | 20d | 15 | hint | 13 | +3.07% [+0.87%, +3.25%] n=13, 2 wk | 61.5% [35.5%, 82.3%] | 0.0% | - |
-| news_multi_source | 1d | 122 | not in B0 | 0 | - | - | - | 2.4% |
-| news_multi_source | 5d | 106 | not in B0 | 0 | - | - | - | 5.8% |
-| news_multi_source | 20d | 61 | not in B0 | 0 | - | - | - | 10.4% |
-| sast_acquisition | 1d | 15 | UP | 15 | -0.08% [-0.91%, +1.35%] n=15, 4 wk | 53.3% [30.1%, 75.2%] | 0.7% | - |
+| news_multi_source | 1d | 123 | not in B0 | 0 | - | - | - | 2.4% |
+| news_multi_source | 5d | 113 | not in B0 | 0 | - | - | - | 5.7% |
+| news_multi_source | 20d | 66 | not in B0 | 0 | - | - | - | 10.0% |
+| sast_acquisition | 1d | 16 | UP | 16 | -0.07% [-0.77%, +1.35%] n=16, 4 wk | 56.2% [33.2%, 76.9%] | 0.7% | - |
 | sast_acquisition | 5d | 10 | UP | 10 | -6.87% [-11.96%, -0.98%] n=10, 3 wk | 10.0% [1.8%, 40.4%] | 0.7% | - |
 | sast_acquisition | 20d | 4 | UP | 4 | -7.17% [-21.63%, -2.35%] n=4, 2 wk | 25.0% [4.6%, 69.9%] | 0.6% | - |
-| volume_breakout | 1d | 594 | hint | 594 | -1.16% [-1.22%, -1.02%] n=594, 4 wk | 42.4% [38.5%, 46.4%] | 0.7% | - |
-| volume_breakout | 5d | 435 | hint | 435 | -3.12% [-4.32%, +0.01%] n=435, 3 wk | 34.9% [30.6%, 39.5%] | 0.7% | - |
-| volume_breakout | 20d | 193 | hint | 193 | -9.75% [-11.57%, -3.94%] n=193, 2 wk | 26.4% [20.7%, 33.1%] | 0.7% | - |
-| volume_spurt_notice | 1d | 87 | not in B0 | 0 | - | - | - | 2.2% |
-| volume_spurt_notice | 5d | 69 | not in B0 | 0 | - | - | - | 5.1% |
-| volume_spurt_notice | 20d | 62 | not in B0 | 0 | - | - | - | 15.5% |
+| volume_breakout | 1d | 596 | hint | 596 | -1.15% [-1.21%, -1.02%] n=596, 4 wk | 42.4% [38.5%, 46.5%] | 0.7% | - |
+| volume_breakout | 5d | 485 | hint | 485 | -3.26% [-4.35%, -1.55%] n=485, 4 wk | 33.4% [29.3%, 37.7%] | 0.7% | - |
+| volume_breakout | 20d | 240 | hint | 240 | -10.58% [-12.15%, -3.94%] n=240, 2 wk | 24.2% [19.2%, 30.0%] | 0.7% | - |
+| volume_spurt_notice | 1d | 89 | not in B0 | 0 | - | - | - | 2.1% |
+| volume_spurt_notice | 5d | 76 | not in B0 | 0 | - | - | - | 5.2% |
+| volume_spurt_notice | 20d | 65 | not in B0 | 0 | - | - | - | 15.5% |
 
 ## B0 by liquidity bucket (5d, NSE equities)
 
 | bucket | n | B0 net (95% week-block CI) |
 |---|---|---|
-| large | 148 | -6.56% [-8.64%, -1.17%] n=148, 4 wk |
-| mid | 343 | -4.08% [-5.76%, -0.55%] n=343, 4 wk |
-| small | 458 | -4.92% [-7.01%, +0.05%] n=458, 4 wk |
-| unknown | 22 | +2.22% [-12.26%, +5.44%] n=22, 2 wk |
+| large | 168 | -6.60% [-8.80%, -1.17%] n=168, 4 wk |
+| mid | 370 | -4.08% [-5.50%, -1.74%] n=370, 4 wk |
+| small | 508 | -5.04% [-6.87%, -1.58%] n=508, 4 wk |
+| unknown | 55 | -3.06% [-14.33%, +4.91%] n=55, 4 wk |
 
 ## Macro views (calibration only, never playbook evidence)
 
